@@ -123,13 +123,37 @@ All commands: `uv run github-analysis <command> --help`
 
 ### Date windows
 
-Half-open calendar window in US Eastern (`America/New_York`):
+Reports use a **half-open** calendar window in US Eastern (`America/New_York`):
 
-| Period | `--start-date` | `--end-date` |
-|--------|----------------|--------------|
-| All of May 2026 | `2026-05-01` | `2026-06-01` |
-| One week | `2026-05-01` | `2026-05-08` |
-| Q1 2026 | `2026-01-01` | `2026-04-01` |
+```
+--start-date <= event time < --end-date
+```
+
+| Flag | Boundary | Meaning |
+|------|----------|---------|
+| `--start-date` | **Inclusive** (`>=`) | First calendar day **included** — activity from **00:00** on this date |
+| `--end-date` | **Exclusive** (`<`) | First calendar day **excluded** — window ends the instant **before** 00:00 on this date |
+
+**Important:** `--end-date` uses **strict less-than**, not less-than-or-equal. A PR merged at **June 1 00:00 Eastern** is **not** in a May report that uses `--end-date 2026-06-01`.
+
+**Example — all of May 2026:**
+
+| | Value |
+|--|-------|
+| `--start-date` | `2026-05-01` |
+| `--end-date` | `2026-06-01` |
+| **Includes** | May 1 00:00:00 through May 31 23:59:59 (Eastern) |
+| **Excludes** | June 1 and later |
+
+Every metric (merged, authored, reviews, `prs_open` snapshot at month-end) uses this same window. GitHub search queries use the equivalent inclusive calendar range (`2026-05-01..2026-05-31` for the example above).
+
+**More examples:**
+
+| Period | `--start-date` | `--end-date` | Last day included |
+|--------|----------------|--------------|-------------------|
+| All of May 2026 | `2026-05-01` | `2026-06-01` | May 31 |
+| One week (May 1–7) | `2026-05-01` | `2026-05-08` | May 7 |
+| Q1 2026 | `2026-01-01` | `2026-04-01` | March 31 |
 
 ### Common workflows
 
