@@ -783,66 +783,107 @@ All date windows use **US Eastern** (`America/New_York`) unless you change `REPO
 
 File: `{name}_person_summary.tsv` — Excel sheet **Individual Production**.
 
+#### Column reference (detailed)
+
+| Column | What it counts | Included | Excluded |
+|--------|----------------|----------|----------|
+| `user` | GitHub login for this person. | — | — |
+| `prs_authored` | PRs **opened in the calendar month** (`created_at` in the window). | Opened in May whether merged in May, merged later, still open, or closed without merge. | PRs opened before the month (even if still open or merged in the month). |
+| `prs_merged` | PRs they **created** that **merged in the calendar month** (`merged_at` in the window). | Carry-over PRs opened in April (or earlier) but merged in May. | PRs opened in May that had not merged by month-end; PRs merged after the window. |
+| `prs_open` | PRs **still not merged at month-end** (`merged_at` empty or after window end). | Any create date — April PR still in flight on May 31; May 31 PR not yet merged. | PRs merged on or before month-end; PRs **closed without merge** before month-end. |
+| `prs_reviewed` | **Distinct PRs** where they submitted **any review** in the window. | Uses review `submitted_at`, not merge date. | — |
+| `prs_approved` | **Distinct PRs** where they submitted an **APPROVED** review in the window. | Uses review `submitted_at`. | — |
+| `avg_files_added_per_pr` | Mean **new files** per PR in the **detail report**. | — | Blank if no detail rows for that person. |
+| `avg_files_changed_per_pr` | Mean **modified/renamed** files per PR in the detail report. | Excludes adds and deletions. | Blank if no detail rows. |
+| `min_hours_pr_created_to_merged` | Shortest hours from PR open → merge. | PRs **merged in the window** only. | `prs_open` PRs; PRs merged after the window. Blank if none. |
+| `max_hours_pr_created_to_merged` | Longest hours from PR open → merge. | Same as min. | Same as min. |
+| `avg_hours_pr_created_to_merged` | Mean hours from PR open → merge. | Same as min. | Same as min. |
+
+#### The three PR count columns are independent
+
+| Column | Question | Time rule |
+|--------|----------|-----------|
+| **`prs_authored`** | How many PRs did they **open this month**? | `created_at` in calendar window only |
+| **`prs_merged`** | How many of **their** PRs **merged this month**? | `merged_at` in window; **any** open date |
+| **`prs_open`** | How many of **their** PRs were **still unmerged at month-end**? | Snapshot at window end; **any** open date |
+
+These three numbers are **often different**. Examples for a **May 2026** report (`--start-date 2026-05-01`, `--end-date 2026-06-01`):
+
+| Scenario | `prs_authored` | `prs_merged` | `prs_open` |
+|----------|----------------|--------------|------------|
+| Opened PR on **May 31**, not merged until June | 1 | 0 | 1 |
+| Opened PR on **May 15**, merged **May 20** | 1 | 1 | 0 |
+| Opened PR in **April**, merged **May 10** | 0 | 1 | 0 |
+| Opened PR in **April**, still open **May 31** | 0 | 0 | 1 |
+| Opened **8 in May**, merged **5 in May**, **2 still open**, **1 closed unmerged in May** | 8 | 5 | 2 (closed-unmerged does not count as “open”) |
+| Reviewer only; no May PRs; old April PR still open | 0 | 0 | 1 |
+
+**`prs_authored` does not require merge.** A May PR counts whether it merged in May, June, never, or was closed without merge.
+
+**`prs_open` does not require May authorship.** An April PR still waiting for merge on May 31 counts toward `prs_open` but not `prs_authored`.
+
+#### Other summary notes
+
+**Merge cycle time** (`min/max/avg_hours_pr_created_to_merged`): only PRs **merged in the calendar window**. Never includes **`prs_open`** PRs. Blank when the person has no qualifying merges.
+
+**File averages:** from **detail report** rows only. With `--merged-only`, that is merged PRs in the window — not all authored or open PRs.
+
+Review and approval counts use review **`submitted_at`** in the window, not PR merge date.
+
+For `--merged-only` behavior and search phases, see [Monthly metrics](#monthly-metrics-and---merged-only).
+
+#### Quick lookup (short descriptions)
+
 | Column | Short description |
 |--------|-------------------|
-| `user` | GitHub login for this person. |
-| `prs_merged` | Count of PRs they **created** that **merged during the calendar window** (any open date — includes carry-over PRs opened before the month). |
-| `prs_reviewed` | Count of **distinct PRs** where they submitted **any review** (`submitted_at` in the window). |
-| `prs_approved` | Count of **distinct PRs** where they submitted an **APPROVED** review (`submitted_at` in the window). |
-| `prs_authored` | Count of PRs they **opened during the calendar window** only (May 1–31 for a May report). |
-| `prs_open` | Count of their PRs **still open at month-end** — any create date; see [How `prs_open` is calculated](#how-prs_open-is-calculated). |
-| `avg_files_added_per_pr` | Mean **new files** (`added`) per PR in the **detail report**; blank if they have no detail rows. |
-| `avg_files_changed_per_pr` | Mean **modified or renamed** files per PR in the **detail report**; excludes adds and deletions. |
-| `min_hours_pr_created_to_merged` | Shortest elapsed **hours** from PR open to merge, over PRs **merged in the window** only. |
-| `max_hours_pr_created_to_merged` | Longest elapsed **hours** from PR open to merge, over PRs **merged in the window** only. |
-| `avg_hours_pr_created_to_merged` | Mean elapsed **hours** from PR open to merge, over PRs **merged in the window** only. |
-
-**Important:** `prs_authored`, `prs_merged`, and `prs_open` answer **different questions** and are often **not equal**. Example: a PR opened May 31 counts toward `prs_authored` and possibly `prs_open`, but not `prs_merged` until it merges (possibly in a later month).
-
-**Merge cycle time** (`min/max/avg_hours_pr_created_to_merged`): only PRs **merged in the calendar window**. Excludes **`prs_open`** PRs and PRs merged after the window. Blank when the person has no qualifying merges.
-
-**File averages:** computed from **detail report** rows only. With `--merged-only`, that means merged PRs in the window — not all authored or open PRs.
-
-Review and approval counts use review **`submitted_at`** inside your date window, not PR merge date.
-
-For examples and `--merged-only` behavior, see [Monthly metrics](#monthly-metrics-and---merged-only).
+| `user` | GitHub login. |
+| `prs_authored` | PRs **opened in the calendar month** (merged or not). |
+| `prs_merged` | Their PRs **merged in the calendar month** (opened any time). |
+| `prs_open` | Their PRs **still unmerged at month-end** (opened any time). |
+| `prs_reviewed` | Distinct PRs reviewed in the window. |
+| `prs_approved` | Distinct PRs with an APPROVED review in the window. |
+| `avg_files_added_per_pr` | Mean new files per detail-row PR. |
+| `avg_files_changed_per_pr` | Mean modified/renamed files per detail-row PR. |
+| `min/max/avg_hours_pr_created_to_merged` | Min / max / mean hours from open to merge (merged-in-window only). |
 
 ### PR detail (one row per pull request)
 
 File: `{name}.tsv` — Excel sheet **PR Detail**. Row 3 is the header; rows 1–2 are notes.
 
-| Column | Short description |
-|--------|-------------------|
-| `pr_creator` | GitHub login of the person who **opened** the PR (`user` field — not assignee). |
-| `head_branch` | Source branch name for the PR. |
-| `pr_number` | Pull request number in the repository. |
-| `notes` | Warnings or flags (e.g. `catalog_author_mismatch`, truncated data). |
-| `pr_url` | Link to the PR on GitHub. |
-| `branch_start` | Timestamp of the **first commit** on the PR branch (local wall-clock). |
-| `branch_start_hours_since_branch` | Always `0.00` — anchor for elapsed-hour columns. |
-| `pr_created` | When the PR was **opened** on GitHub. |
+#### Column reference (detailed)
+
+| Column | Description |
+|--------|-------------|
+| `pr_creator` | GitHub login of whoever **opened** the PR (`user` on GitHub — not assignee). |
+| `head_branch` | Source branch name. |
+| `pr_number` | Pull request number in this repository. |
+| `notes` | Flags or warnings (`catalog_author_mismatch`, truncated pagination, etc.). |
+| `pr_url` | Canonical GitHub URL for the PR. |
+| `branch_start` | Timestamp of the **first commit** on the PR branch (report timezone). |
+| `branch_start_hours_since_branch` | Anchor column; always `0.00`. |
+| `pr_created` | When the PR was **opened** (`created_at`). |
 | `pr_created_hours_since_branch` | Hours from first branch commit to PR open. |
-| `first_draft` | First **draft** PR event, if any. |
+| `first_draft` | First time the PR was marked **draft**, if applicable. |
 | `first_draft_hours_since_branch` | Hours from branch start to first draft. |
 | `ready_for_review` | When the PR was marked **ready for review** (undrafted). |
 | `ready_for_review_hours_since_branch` | Hours from branch start to ready-for-review. |
-| `first_feedback` | First review comment or review submission on the PR. |
+| `first_feedback` | First review comment or review submission. |
 | `first_feedback_hours_since_branch` | Hours from branch start to first feedback. |
 | `approved` | When the **first APPROVED** review was submitted. |
 | `approved_hours_since_branch` | Hours from branch start to first approval. |
-| `approved_by` | GitHub login of the person who submitted the first **APPROVED** review. |
+| `approved_by` | Login of whoever submitted the first **APPROVED** review. |
 | `merged` | When the PR was **merged**; blank if not merged. |
 | `merged_hours_since_branch` | Hours from branch start to merge. |
 | `hours_pr_created_to_first_feedback` | Hours from PR open to first feedback. |
 | `hours_pr_created_to_approved` | Hours from PR open to first approval. |
 | `hours_pr_created_to_closed` | Hours from PR open to close (merge or close-without-merge). |
-| `pr_files_total` | Total files touched in the PR diff. |
-| `pr_files_added` | Files with status **added** (new files). |
+| `pr_files_total` | Total files in the PR diff. |
+| `pr_files_added` | Files with status **added**. |
 | `pr_files_modified` | Files **modified** or **renamed**. |
 | `pr_files_removed` | Files **deleted**. |
 | `pr_commits_total` | Total commits on the PR branch. |
-| `pr_commits_before_pr_open` | Commits on the branch **before** the PR was opened. |
-| `pr_commits_after_pr_open` | Commits on the branch **after** the PR was opened. |
+| `pr_commits_before_pr_open` | Commits before the PR was opened. |
+| `pr_commits_after_pr_open` | Commits after the PR was opened. |
 
 Datetime columns use the report timezone (`America/New_York` by default) as ISO-8601 with offset. Hour columns are decimal elapsed hours.
 
