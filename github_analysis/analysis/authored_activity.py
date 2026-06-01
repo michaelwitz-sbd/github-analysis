@@ -122,28 +122,65 @@ def build_pr_states(
     return states
 
 
-def counts_authored_and_merged_in_window(
+def counts_authored_in_window(
     pr_states: dict[int, dict[str, object]],
     *,
     start_utc: datetime,
     end_exclusive_utc: datetime,
-) -> tuple[dict[str, int], dict[str, int]]:
+) -> dict[str, int]:
+    """PRs opened (created) in the calendar window."""
     authored: dict[str, int] = defaultdict(int)
-    merged_in_window: dict[str, int] = defaultdict(int)
 
     for state in pr_states.values():
         author = str(state.get("author") or "(unknown)")
         pr_created = state.get("pr_created")
-        merged_at = state.get("merged")
         if not isinstance(pr_created, datetime):
             continue
         if pr_created < start_utc or pr_created >= end_exclusive_utc:
             continue
         authored[author] += 1
-        if isinstance(merged_at, datetime) and start_utc <= merged_at < end_exclusive_utc:
-            merged_in_window[author] += 1
 
-    return dict(authored), dict(merged_in_window)
+    return dict(authored)
+
+
+def counts_merged_in_window(
+    pr_states: dict[int, dict[str, object]],
+    *,
+    start_utc: datetime,
+    end_exclusive_utc: datetime,
+) -> dict[str, int]:
+    """PRs merged in the calendar window (any create date)."""
+    merged: dict[str, int] = defaultdict(int)
+
+    for state in pr_states.values():
+        author = str(state.get("author") or "(unknown)")
+        merged_at = state.get("merged")
+        if not isinstance(merged_at, datetime):
+            continue
+        if merged_at < start_utc or merged_at >= end_exclusive_utc:
+            continue
+        merged[author] += 1
+
+    return dict(merged)
+
+
+def counts_merged_in_window_from_rows(
+    rows: list[PullRequestRow],
+    *,
+    start_utc: datetime,
+    end_exclusive_utc: datetime,
+) -> dict[str, int]:
+    """PRs merged in the calendar window from already-fetched detail rows."""
+    merged: dict[str, int] = defaultdict(int)
+
+    for row in rows:
+        if row.merged is None:
+            continue
+        if row.merged < start_utc or row.merged >= end_exclusive_utc:
+            continue
+        merged[row.author or "(unknown)"] += 1
+
+    return dict(merged)
 
 
 def counts_open_at_month_end(

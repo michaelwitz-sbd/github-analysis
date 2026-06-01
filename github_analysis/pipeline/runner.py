@@ -6,7 +6,8 @@ from typing import Any, Optional
 
 from github_analysis.analysis.authored_activity import (
     build_pr_states,
-    counts_authored_and_merged_in_window,
+    counts_authored_in_window,
+    counts_merged_in_window_from_rows,
     counts_open_at_month_end,
 )
 from github_analysis.analysis.pr_builder import build_pull_request_row
@@ -287,8 +288,13 @@ def run_report(
             emit_error=emit_error,
             progress_label="open-candidate",
         )
-        authored_counts, merged_in_month_counts = counts_authored_and_merged_in_window(
+        authored_counts = counts_authored_in_window(
             created_pr_states,
+            start_utc=start_utc,
+            end_exclusive_utc=end_exclusive_utc,
+        )
+        merged_in_month_counts = counts_merged_in_window_from_rows(
+            rows,
             start_utc=start_utc,
             end_exclusive_utc=end_exclusive_utc,
         )

@@ -8,7 +8,8 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from github_analysis.analysis.authored_activity import (
-    counts_authored_and_merged_in_window,
+    counts_authored_in_window,
+    counts_merged_in_window_from_rows,
     counts_open_at_month_end,
 )
 from github_analysis.analysis.summaries import compute_user_summaries
@@ -201,8 +202,13 @@ def load_raw_cache(path: str) -> ReportResult:
     if not open_pr_states:
         open_pr_states = created_pr_states
     if created_pr_states and start_utc and end_exclusive_utc:
-        authored_counts, merged_in_month_counts = counts_authored_and_merged_in_window(
+        authored_counts = counts_authored_in_window(
             created_pr_states,
+            start_utc=start_utc,
+            end_exclusive_utc=end_exclusive_utc,
+        )
+        merged_in_month_counts = counts_merged_in_window_from_rows(
+            rows,
             start_utc=start_utc,
             end_exclusive_utc=end_exclusive_utc,
         )
