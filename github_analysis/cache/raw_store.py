@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
+from github_analysis.analysis.summaries import compute_user_summaries
 from github_analysis.models import (
     PullRequestRow,
     ReportConfig,
@@ -81,6 +82,9 @@ def _summary_from_dict(data: dict[str, Any]) -> UserSummary:
         prs_open=int(data["prs_open"]),
         avg_files_added_per_pr=data.get("avg_files_added_per_pr", ""),
         avg_files_changed_per_pr=data.get("avg_files_changed_per_pr", ""),
+        min_hours_created_to_merged=data.get("min_hours_created_to_merged", ""),
+        max_hours_created_to_merged=data.get("max_hours_created_to_merged", ""),
+        avg_hours_created_to_merged=data.get("avg_hours_created_to_merged", ""),
     )
 
 
@@ -133,10 +137,18 @@ def load_raw_cache(path: str) -> ReportResult:
         report_tz=ZoneInfo(cfg["report_tz"]),
         merged_only=bool(cfg.get("merged_only", False)),
     )
+    rows = [_row_from_dict(row) for row in payload.get("rows", [])]
+    review_counts = {
+        key: int(value) for key, value in (payload.get("review_counts_by_user") or {}).items()
+    }
+    approval_counts = {
+        key: int(value) for key, value in (payload.get("approval_counts_by_user") or {}).items()
+    }
+    summaries = compute_user_summaries(rows, review_counts, approval_counts)
     return ReportResult(
         config=config,
-        rows=[_row_from_dict(row) for row in payload.get("rows", [])],
-        summaries=[_summary_from_dict(item) for item in payload.get("summaries", [])],
+        rows=rows,
+        summaries=summaries,
         skipped_pr_numbers=[int(n) for n in payload.get("skipped_pr_numbers", [])],
         start_utc=_dt_from_json(payload.get("start_utc")),
         end_exclusive_utc=_dt_from_json(payload.get("end_exclusive_utc")),

@@ -82,7 +82,7 @@ Creates:
 
 **If something fails, open `{name}_run.log` first.** It records GitHub authentication status, repository access checks, skipped PRs, and every person included in the summary.
 
-Rebuild TSV/Excel from cache without re-fetching:
+Rebuild TSV/Excel from cache without re-fetching (person summaries are **recomputed** from cached PR rows, so new summary columns appear without calling GitHub again):
 
 ```bash
 cd ~/Dev/github-analysis
@@ -781,13 +781,18 @@ File: `{name}_person_summary.tsv` — Excel sheet **Individual Production**.
 | `prs_open` | Authored PRs still open or closed without merge |
 | `avg_files_added_per_pr` | Mean **new files** (`status: added`) per **authored** PR |
 | `avg_files_changed_per_pr` | Mean **modified/renamed** files per **authored** PR (excludes adds and deletions) |
+| `min_hours_created_to_merged` | Shortest time (**hours**) from PR open to merge, over **authored merged** PRs |
+| `max_hours_created_to_merged` | Longest time (**hours**) from PR open to merge, over authored merged PRs |
+| `avg_hours_created_to_merged` | Mean time (**hours**) from PR open to merge, over authored merged PRs |
 
 **Added vs changed:** GitHub classifies each file in a PR diff as `added`, `modified`/`renamed`, or `removed`.
 
 - **`avg_files_added_per_pr`** — brand-new files only  
 - **`avg_files_changed_per_pr`** — existing files edited or renamed (not new, not deleted)
 
-Blank averages mean the person **authored no PRs** in the window (they may still appear with review/approval counts).
+**Merge cycle time:** computed from each PR’s `pr_created` and `merged` timestamps (hours, 2 decimal places). Only **authored** PRs that merged with both timestamps count. Blank when the person has no qualifying merged PRs.
+
+Blank file averages mean the person **authored no PRs** in the window (they may still appear with review/approval counts).
 
 Review and approval counts use review **`submitted_at`** inside your date window, not PR merge date.
 
@@ -825,6 +830,7 @@ These rules drive manager-facing numbers. They are intentional — do not use as
 | **Reviewer** | Anyone who submitted a review (`submitted_at` in window) | Review comments without a formal review |
 | **Approver** | Review with `state: APPROVED` in window | LGTM comments, CODEOWNERS without review |
 | **File averages** | Mean over PRs **authored** by that person | Reviewed-only contributors get blank averages |
+| **Merge cycle time** | Min/max/avg hours from PR open to merge on **authored merged** PRs | PRs missing `created_at` or `merged_at` |
 
 The run log lists every person in the summary with merged / reviewed / approved / authored counts for audit.
 

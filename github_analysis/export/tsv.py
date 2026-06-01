@@ -121,7 +121,9 @@ def write_summary_tsv(summaries: list[UserSummary], fh: TextIO, config: ReportCo
         "prs_approved = distinct PRs where they submitted an APPROVED review. "
         "File columns are means per authored PR (not repo-wide totals): "
         "avg_files_added_per_pr = new files; avg_files_changed_per_pr = modified/renamed files "
-        "(excludes new files and deletions). Blank when the person authored no PRs in the window.\n"
+        "(excludes new files and deletions). "
+        "min/max/avg_hours_created_to_merged = hours from PR open to merge over authored merged PRs. "
+        "Blank when the person authored no merged PRs in the window.\n"
     )
     headers = [
         "user",
@@ -132,6 +134,9 @@ def write_summary_tsv(summaries: list[UserSummary], fh: TextIO, config: ReportCo
         "prs_open",
         "avg_files_added_per_pr",
         "avg_files_changed_per_pr",
+        "min_hours_created_to_merged",
+        "max_hours_created_to_merged",
+        "avg_hours_created_to_merged",
     ]
     fh.write("\t".join(headers) + "\n")
     for summary in summaries:
@@ -146,6 +151,9 @@ def write_summary_tsv(summaries: list[UserSummary], fh: TextIO, config: ReportCo
                     str(summary.prs_open),
                     summary.avg_files_added_per_pr,
                     summary.avg_files_changed_per_pr,
+                    summary.min_hours_created_to_merged,
+                    summary.max_hours_created_to_merged,
+                    summary.avg_hours_created_to_merged,
                 ]
             )
             + "\n"

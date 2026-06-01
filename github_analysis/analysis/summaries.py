@@ -5,6 +5,28 @@ from collections import defaultdict
 from github_analysis.models import PullRequestRow, UserSummary
 
 
+def _hours_created_to_merged(row: PullRequestRow) -> float | None:
+    if row.pr_created is None or row.merged is None:
+        return None
+    return (row.merged - row.pr_created).total_seconds() / 3600.0
+
+
+def _format_hours(value: float) -> str:
+    return f"{value:.2f}"
+
+
+def _merge_cycle_stats(authored: list[PullRequestRow]) -> tuple[str, str, str]:
+    """Min, max, and mean hours from PR open to merge for authored merged PRs."""
+    hours = [value for row in authored if (value := _hours_created_to_merged(row)) is not None]
+    if not hours:
+        return "", "", ""
+    return (
+        _format_hours(min(hours)),
+        _format_hours(max(hours)),
+        _format_hours(sum(hours) / len(hours)),
+    )
+
+
 def compute_user_summaries(
     rows: list[PullRequestRow],
     review_counts_by_user: dict[str, int],
@@ -34,6 +56,7 @@ def compute_user_summaries(
         else:
             avg_added_s = ""
             avg_modified_s = ""
+        min_hours, max_hours, avg_hours = _merge_cycle_stats(authored)
         summaries.append(
             UserSummary(
                 user=user,
@@ -44,6 +67,9 @@ def compute_user_summaries(
                 prs_open=open_count,
                 avg_files_added_per_pr=avg_added_s,
                 avg_files_changed_per_pr=avg_modified_s,
+                min_hours_created_to_merged=min_hours,
+                max_hours_created_to_merged=max_hours,
+                avg_hours_created_to_merged=avg_hours,
             )
         )
     return summaries

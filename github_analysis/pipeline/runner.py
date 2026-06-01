@@ -65,6 +65,9 @@ def _log_person_coverage(
             f"reviewed={summary.prs_reviewed}, "
             f"approved={summary.prs_approved}, "
             f"authored={summary.prs_authored}, "
+            f"avg_hours_created_to_merged={summary.avg_hours_created_to_merged or '-'}, "
+            f"min_hours_created_to_merged={summary.min_hours_created_to_merged or '-'}, "
+            f"max_hours_created_to_merged={summary.max_hours_created_to_merged or '-'}, "
             f"avg_files_added_per_pr={summary.avg_files_added_per_pr or '-'}, "
             f"avg_files_changed_per_pr={summary.avg_files_changed_per_pr or '-'}"
         )

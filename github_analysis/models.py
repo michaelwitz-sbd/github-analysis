@@ -63,6 +63,9 @@ class UserSummary:
     prs_open: int
     avg_files_added_per_pr: str
     avg_files_changed_per_pr: str
+    min_hours_created_to_merged: str = ""
+    max_hours_created_to_merged: str = ""
+    avg_hours_created_to_merged: str = ""
 
 
 @dataclass
