@@ -340,3 +340,9 @@ gh repo view OWNER/REPO
 - GitHub search: max **1,000 results per query** — split long date ranges if needed
 - Reviews/comments: first 100 items per PR for timing
 - Files/commits: up to 10,000 per PR (truncation noted in `notes`)
+
+---
+
+## For contributors
+
+See [docs/](docs/README.md) for architecture and CLI extension notes.
