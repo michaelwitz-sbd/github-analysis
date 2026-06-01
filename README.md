@@ -237,21 +237,27 @@ Prefer **`remaining > 1,000`** before a full-month report on a busy repo. Quota 
 | `prs_authored` | PRs **opened** in the calendar window (merged or not) |
 | `prs_merged` | Their PRs **merged** in the window (any open date, including carry-over) |
 | `prs_open` | Their PRs **still unmerged at window end** (any open date) |
+| `prs_closed_unmerged` | PRs **they opened in the window** and **closed without merge** before window end |
 | `prs_reviewed` | Distinct PRs with any review submitted in the window |
 | `prs_approved` | Distinct PRs with an APPROVED review in the window |
 | `avg_files_added_per_pr` | Mean new files per PR in the detail report |
 | `avg_files_changed_per_pr` | Mean modified/renamed files per detail-row PR |
 | `min/max/avg_hours_pr_created_to_merged` | Hours from PR open to merge (merged-in-window only; excludes `prs_open`) |
 
-**The three PR counts are independent.** Example for May 2026 (`2026-05-01` .. `2026-06-01`):
+**PR count columns for PRs opened in the window** reconcile as:
 
-| Scenario | `prs_authored` | `prs_merged` | `prs_open` |
-|----------|----------------|--------------|------------|
-| Opened May 31, merged in June | 1 | 0 | 1 |
-| Opened May 15, merged May 20 | 1 | 1 | 0 |
-| Opened in April, merged in May | 0 | 1 | 0 |
-| Opened in April, still open May 31 | 0 | 0 | 1 |
-| Opened 8 in May; merged 5; 2 still open; 1 closed unmerged | 8 | 5 | 2 |
+`prs_authored` ≈ `prs_merged` + `prs_open` + `prs_closed_unmerged` (plus any still open at month-end that merge after the window — rare).
+
+Example for May 2026 (`2026-05-01` .. `2026-06-01`):
+
+| Scenario | `prs_authored` | `prs_merged` | `prs_open` | `prs_closed_unmerged` |
+|----------|----------------|--------------|------------|------------------------|
+| Opened May 31, merged in June | 1 | 0 | 1 | 0 |
+| Opened May 15, merged May 20 | 1 | 1 | 0 | 0 |
+| Opened in April, merged in May | 0 | 1 | 0 | 0 |
+| Opened in April, still open May 31 | 0 | 0 | 1 | 0 |
+| Opened May 10, closed without merge May 12 | 1 | 0 | 0 | 1 |
+| Opened 8 in May; merged 5; 2 still open; 1 closed unmerged | 8 | 5 | 2 | 1 |
 
 Merge-cycle hours and file averages come from **detail report rows** only (merged PRs when `--merged-only`). Review counts use review `submitted_at`, not merge date.
 
@@ -283,9 +289,11 @@ Timestamps use the report timezone as ISO-8601 with offset.
 With **`--merged-only`** (recommended for monthly manager reports):
 
 - **PR detail sheet** — only PRs merged in the calendar window
-- **Person summary** — still computes `prs_authored`, `prs_open`, and review counts via separate searches
+- **Person summary** — still computes `prs_authored`, `prs_open`, `prs_closed_unmerged`, and review counts via separate searches
 
 A PR counts toward **`prs_open`** at window end if it existed, had not merged, and was not closed without merge before window end — regardless of when it was opened.
+
+A PR counts toward **`prs_closed_unmerged`** if they opened it in the window and it was closed without merge before window end.
 
 ---
 

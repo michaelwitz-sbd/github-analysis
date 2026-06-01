@@ -11,6 +11,24 @@ from github_analysis.models import PullRequestRow
 from github_analysis.time_utils import parse_github_ts
 
 
+def is_closed_unmerged_in_window(
+    pr_created: Optional[datetime],
+    merged_at: Optional[datetime],
+    closed_at: Optional[datetime],
+    *,
+    start_inclusive_utc: datetime,
+    end_exclusive_utc: datetime,
+) -> bool:
+    """True when a PR was opened in the calendar window and closed without merge before window end."""
+    if pr_created is None or pr_created < start_inclusive_utc or pr_created >= end_exclusive_utc:
+        return False
+    if merged_at is not None:
+        return False
+    if closed_at is None or closed_at >= end_exclusive_utc:
+        return False
+    return True
+
+
 def is_open_at_month_end(
     pr_created: Optional[datetime],
     merged_at: Optional[datetime],
@@ -181,6 +199,32 @@ def counts_merged_in_window_from_rows(
         merged[row.author or "(unknown)"] += 1
 
     return dict(merged)
+
+
+def counts_closed_unmerged_in_window(
+    pr_states: dict[int, dict[str, object]],
+    *,
+    start_inclusive_utc: datetime,
+    end_exclusive_utc: datetime,
+) -> dict[str, int]:
+    """PRs opened in the calendar window and closed without merge before window end."""
+    closed_unmerged: dict[str, int] = defaultdict(int)
+
+    for state in pr_states.values():
+        author = str(state.get("author") or "(unknown)")
+        pr_created = state.get("pr_created")
+        merged_at = state.get("merged")
+        closed_at = state.get("closed_at")
+        if is_closed_unmerged_in_window(
+            pr_created if isinstance(pr_created, datetime) else None,
+            merged_at if isinstance(merged_at, datetime) else None,
+            closed_at if isinstance(closed_at, datetime) else None,
+            start_inclusive_utc=start_inclusive_utc,
+            end_exclusive_utc=end_exclusive_utc,
+        ):
+            closed_unmerged[author] += 1
+
+    return dict(closed_unmerged)
 
 
 def counts_open_at_month_end(

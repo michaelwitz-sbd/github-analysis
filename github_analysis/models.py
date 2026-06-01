@@ -61,6 +61,7 @@ class UserSummary:
     prs_approved: int
     prs_authored: int
     prs_open: int
+    prs_closed_unmerged: int
     avg_files_added_per_pr: str
     avg_files_changed_per_pr: str
     min_hours_pr_created_to_merged: str = ""

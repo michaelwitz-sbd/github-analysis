@@ -7,6 +7,7 @@ from typing import Any, Optional
 from github_analysis.analysis.authored_activity import (
     build_pr_states,
     counts_authored_in_window,
+    counts_closed_unmerged_in_window,
     counts_merged_in_window_from_rows,
     counts_open_at_month_end,
 )
@@ -74,6 +75,7 @@ def _log_person_coverage(
             f"approved={summary.prs_approved}, "
             f"authored={summary.prs_authored}, "
             f"open_at_month_end={summary.prs_open}, "
+            f"closed_unmerged={summary.prs_closed_unmerged}, "
             f"avg_hours_pr_created_to_merged={summary.avg_hours_pr_created_to_merged or '-'}, "
             f"min_hours_pr_created_to_merged={summary.min_hours_pr_created_to_merged or '-'}, "
             f"max_hours_pr_created_to_merged={summary.max_hours_pr_created_to_merged or '-'}, "
@@ -302,6 +304,11 @@ def run_report(
             open_pr_states,
             end_exclusive_utc=end_exclusive_utc,
         )
+        closed_unmerged_counts = counts_closed_unmerged_in_window(
+            created_pr_states,
+            start_inclusive_utc=start_utc,
+            end_exclusive_utc=end_exclusive_utc,
+        )
         created_pr_states.update(
             {
                 number: state
@@ -322,6 +329,7 @@ def run_report(
         authored_in_month_by_user=authored_counts,
         merged_in_month_by_user=merged_in_month_counts,
         open_at_month_end_by_user=open_at_end_counts,
+        closed_unmerged_in_window_by_user=closed_unmerged_counts,
     )
     emit(
         f"Fetch complete: {len(rows)} detail row(s); {len(summaries)} person row(s); "

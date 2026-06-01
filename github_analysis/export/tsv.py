@@ -120,7 +120,8 @@ def write_summary_tsv(summaries: list[UserSummary], fh: TextIO, config: ReportCo
         "PR counts: prs_merged = PRs they authored that merged; prs_reviewed = distinct PRs they reviewed; "
         "prs_approved = distinct PRs where they submitted an APPROVED review. "
         "prs_authored = PRs they opened in the calendar window; prs_open = PRs still open at month-end "
-        "(existed before window end; not merged or closed unmerged before window end — any create date). "
+        "(existed before window end; not merged or closed unmerged before window end — any create date); "
+        "prs_closed_unmerged = PRs they opened in the calendar window and closed without merge before window end. "
         "File columns are means per authored PR (not repo-wide totals): "
         "avg_files_added_per_pr = new files; avg_files_changed_per_pr = modified/renamed files "
         "(excludes new files and deletions). "
@@ -135,6 +136,7 @@ def write_summary_tsv(summaries: list[UserSummary], fh: TextIO, config: ReportCo
         "prs_approved",
         "prs_authored",
         "prs_open",
+        "prs_closed_unmerged",
         "avg_files_added_per_pr",
         "avg_files_changed_per_pr",
         "min_hours_pr_created_to_merged",
@@ -152,6 +154,7 @@ def write_summary_tsv(summaries: list[UserSummary], fh: TextIO, config: ReportCo
                     str(summary.prs_approved),
                     str(summary.prs_authored),
                     str(summary.prs_open),
+                    str(summary.prs_closed_unmerged),
                     summary.avg_files_added_per_pr,
                     summary.avg_files_changed_per_pr,
                     summary.min_hours_pr_created_to_merged,

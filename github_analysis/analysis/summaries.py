@@ -69,6 +69,7 @@ def compute_user_summaries(
     authored_in_month_by_user: dict[str, int] | None = None,
     merged_in_month_by_user: dict[str, int] | None = None,
     open_at_month_end_by_user: dict[str, int] | None = None,
+    closed_unmerged_in_window_by_user: dict[str, int] | None = None,
 ) -> list[UserSummary]:
     """Roll up PR creator, reviewer, and approver metrics to one row per GitHub login."""
     by_creator: dict[str, list[PullRequestRow]] = defaultdict(list)
@@ -80,7 +81,8 @@ def compute_user_summaries(
         | set(review_counts_by_user.keys())
         | set(approval_counts_by_user.keys())
         | set((authored_in_month_by_user or {}).keys())
-        | set((open_at_month_end_by_user or {}).keys()),
+        | set((open_at_month_end_by_user or {}).keys())
+        | set((closed_unmerged_in_window_by_user or {}).keys()),
         key=str.lower,
     )
     summaries: list[UserSummary] = []
@@ -93,9 +95,11 @@ def compute_user_summaries(
         if authored_in_month_by_user is not None:
             authored_count = authored_in_month_by_user.get(user, 0)
             open_count = (open_at_month_end_by_user or {}).get(user, 0)
+            closed_unmerged_count = (closed_unmerged_in_window_by_user or {}).get(user, 0)
         else:
             authored_count = len(detail_rows)
             open_count = len(detail_rows) - merged
+            closed_unmerged_count = 0
         if detail_rows:
             avg_added = sum(row.pr_files_added for row in detail_rows) / len(detail_rows)
             avg_modified = sum(row.pr_files_modified for row in detail_rows) / len(detail_rows)
@@ -117,6 +121,7 @@ def compute_user_summaries(
                 prs_approved=approval_counts_by_user.get(user, 0),
                 prs_authored=authored_count,
                 prs_open=open_count,
+                prs_closed_unmerged=closed_unmerged_count,
                 avg_files_added_per_pr=avg_added_s,
                 avg_files_changed_per_pr=avg_modified_s,
                 min_hours_pr_created_to_merged=min_hours,

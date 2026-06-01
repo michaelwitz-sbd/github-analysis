@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from github_analysis.analysis.authored_activity import (
     counts_authored_in_window,
+    counts_closed_unmerged_in_window,
     counts_merged_in_window_from_rows,
     counts_open_at_month_end,
 )
@@ -85,6 +86,7 @@ def _summary_from_dict(data: dict[str, Any]) -> UserSummary:
         prs_approved=int(data.get("prs_approved", 0)),
         prs_authored=int(data["prs_authored"]),
         prs_open=int(data["prs_open"]),
+        prs_closed_unmerged=int(data.get("prs_closed_unmerged", 0)),
         avg_files_added_per_pr=data.get("avg_files_added_per_pr", ""),
         avg_files_changed_per_pr=data.get("avg_files_changed_per_pr", ""),
         min_hours_pr_created_to_merged=data.get(
@@ -216,6 +218,11 @@ def load_raw_cache(path: str) -> ReportResult:
             open_pr_states,
             end_exclusive_utc=end_exclusive_utc,
         )
+        closed_unmerged_counts = counts_closed_unmerged_in_window(
+            created_pr_states,
+            start_inclusive_utc=start_utc,
+            end_exclusive_utc=end_exclusive_utc,
+        )
         summaries = compute_user_summaries(
             rows,
             review_counts,
@@ -225,6 +232,7 @@ def load_raw_cache(path: str) -> ReportResult:
             authored_in_month_by_user=authored_counts,
             merged_in_month_by_user=merged_in_month_counts,
             open_at_month_end_by_user=open_at_end_counts,
+            closed_unmerged_in_window_by_user=closed_unmerged_counts,
         )
     else:
         summaries = compute_user_summaries(
