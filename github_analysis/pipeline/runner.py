@@ -199,28 +199,28 @@ def run_report(
         activity_catalog = build_activity_catalog(
             client,
             config.repository,
-            start_utc,
-            end_exclusive_utc,
+            config.start_date,
+            config.end_date,
             merged_only=config.merged_only,
         )
         review_catalog = build_review_catalog(
             client,
             config.repository,
-            start_utc,
-            end_exclusive_utc,
+            config.start_date,
+            config.end_date,
             activity_catalog=activity_catalog,
         )
         created_catalog = build_created_in_window_catalog(
             client,
             config.repository,
-            start_utc,
-            end_exclusive_utc,
+            config.start_date,
+            config.end_date,
         )
         open_candidate_catalog = build_open_at_month_end_candidate_catalog(
             client,
             config.repository,
-            start_utc,
-            end_exclusive_utc,
+            config.start_date,
+            config.end_date,
         )
     except Exception as exc:
         emit_error(f"GitHub search failed: {exc}")
