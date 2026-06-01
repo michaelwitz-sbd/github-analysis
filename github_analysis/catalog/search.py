@@ -7,18 +7,33 @@ from github_analysis.config import SEARCH_MAX_PAGES
 from github_analysis.github.client import GhClient
 from github_analysis.models import RepositoryRef
 
+_SEARCH_RESULT_CAP = SEARCH_MAX_PAGES * 100
 
-def _catalog_from_queries(client: GhClient, queries: list[str]) -> dict[int, str]:
+
+def _search_truncation_warning(query: str, result_count: int) -> str:
+    return (
+        f"GitHub search truncated at {result_count} result(s) for query: {query!r} "
+        f"(cap {_SEARCH_RESULT_CAP} per query; split the date window)"
+    )
+
+
+def _catalog_from_queries(
+    client: GhClient, queries: list[str]
+) -> tuple[dict[int, str], list[str]]:
     """Map pull number -> PR creator login (`user` from search; assignees are not used)."""
     catalog: dict[int, str] = {}
+    warnings: list[str] = []
     for query in queries:
-        for item in client.search_issues(query, max_pages=SEARCH_MAX_PAGES):
+        items, truncated = client.search_issues(query, max_pages=SEARCH_MAX_PAGES)
+        if truncated:
+            warnings.append(_search_truncation_warning(query, len(items)))
+        for item in items:
             number = item.get("number")
             if number is None:
                 continue
             login = ((item.get("user") or {}).get("login")) or ""
             catalog[int(number)] = login
-    return catalog
+    return catalog, warnings
 
 
 def _repo_pr_base(repository: RepositoryRef) -> str:
@@ -39,7 +54,7 @@ def build_open_at_month_end_candidate_catalog(
     repository: RepositoryRef,
     start_date: date,
     end_date: date,
-) -> dict[int, str]:
+) -> tuple[dict[int, str], list[str]]:
     """
     PRs that may have been open at month-end (regardless of when created).
 
@@ -57,9 +72,12 @@ def build_open_at_month_end_candidate_catalog(
         f"{base} created:<{start} updated:{start}..{last}",
     ]
     catalog: dict[int, str] = {}
+    warnings: list[str] = []
     for query in queries:
-        catalog.update(_catalog_from_queries(client, [query]))
-    return catalog
+        chunk, query_warnings = _catalog_from_queries(client, [query])
+        catalog.update(chunk)
+        warnings.extend(query_warnings)
+    return catalog, warnings
 
 
 def build_created_in_window_catalog(
@@ -67,11 +85,24 @@ def build_created_in_window_catalog(
     repository: RepositoryRef,
     start_date: date,
     end_date: date,
-) -> dict[int, str]:
+) -> tuple[dict[int, str], list[str]]:
     """PRs created (opened) in the calendar window — used for authored/open-at-month-end counts."""
     base = _repo_pr_base(repository)
     return _catalog_from_queries(
         client, [f"{base} {_calendar_range('created', start_date, end_date)}"]
+    )
+
+
+def build_merged_in_window_catalog(
+    client: GhClient,
+    repository: RepositoryRef,
+    start_date: date,
+    end_date: date,
+) -> tuple[dict[int, str], list[str]]:
+    """PRs merged in the calendar window — used for prs_merged counts."""
+    base = _repo_pr_base(repository)
+    return _catalog_from_queries(
+        client, [f"{base} is:merged {_calendar_range('merged', start_date, end_date)}"]
     )
 
 
@@ -82,7 +113,7 @@ def build_activity_catalog(
     end_date: date,
     *,
     merged_only: bool = False,
-) -> dict[int, str]:
+) -> tuple[dict[int, str], list[str]]:
     base = _repo_pr_base(repository)
     queries = [f"{base} is:merged {_calendar_range('merged', start_date, end_date)}"]
     if not merged_only:
@@ -97,15 +128,14 @@ def build_review_catalog(
     end_date: date,
     *,
     activity_catalog: dict[int, str],
-) -> dict[int, str]:
+) -> tuple[dict[int, str], list[str]]:
     base = _repo_pr_base(repository)
     catalog = dict(activity_catalog)
-    catalog.update(
-        _catalog_from_queries(
-            client, [f"{base} {_calendar_range('updated', start_date, end_date)}"]
-        )
+    updated_catalog, warnings = _catalog_from_queries(
+        client, [f"{base} {_calendar_range('updated', start_date, end_date)}"]
     )
-    return catalog
+    catalog.update(updated_catalog)
+    return catalog, warnings
 
 
 def group_prs_by_user(catalog: dict[int, str]) -> list[tuple[str, list[int]]]:

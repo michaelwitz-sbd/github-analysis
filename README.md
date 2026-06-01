@@ -321,7 +321,11 @@ Prefer **`remaining > 1,000`** before a full-month report on a busy repo. Quota 
 
 **PR count columns for PRs opened in the window** reconcile as:
 
-`prs_authored` ≈ `prs_merged` + `prs_open` + `prs_closed_unmerged` (plus any still open at month-end that merge after the window — rare).
+For PRs **opened in the window only**, at window end each falls into exactly one outcome bucket:
+
+`prs_authored` ≈ (window-opened PRs merged in window) + (window-opened PRs still open at end) + `prs_closed_unmerged`
+
+**`prs_merged` and `prs_open` are not subsets of `prs_authored`** — they include carry-over PRs opened before the window, so column totals do not sum this way.
 
 Example for May 2026 (`2026-05-01` .. `2026-06-01`):
 
@@ -332,7 +336,7 @@ Example for May 2026 (`2026-05-01` .. `2026-06-01`):
 | Opened in April, merged in May | 0 | 1 | 0 | 0 |
 | Opened in April, still open May 31 | 0 | 0 | 1 | 0 |
 | Opened May 10, closed without merge May 12 | 1 | 0 | 0 | 1 |
-| Opened 8 in May; merged 5; 2 still open; 1 closed unmerged | 8 | 5 | 2 | 1 |
+| Opened 8 in May; all 5 merges are among those 8; 2 still open; 1 closed unmerged | 8 | 5 | 2 | 1 |
 
 Merge-cycle hours and file averages come from **detail report rows** only (merged PRs when `--merged-only`). Review counts use review `submitted_at`, not merge date.
 

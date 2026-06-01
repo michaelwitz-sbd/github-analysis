@@ -182,25 +182,6 @@ def counts_merged_in_window(
     return dict(merged)
 
 
-def counts_merged_in_window_from_rows(
-    rows: list[PullRequestRow],
-    *,
-    start_utc: datetime,
-    end_exclusive_utc: datetime,
-) -> dict[str, int]:
-    """PRs merged in the calendar window from already-fetched detail rows."""
-    merged: dict[str, int] = defaultdict(int)
-
-    for row in rows:
-        if row.merged is None:
-            continue
-        if row.merged < start_utc or row.merged >= end_exclusive_utc:
-            continue
-        merged[row.author or "(unknown)"] += 1
-
-    return dict(merged)
-
-
 def counts_closed_unmerged_in_window(
     pr_states: dict[int, dict[str, object]],
     *,

@@ -8,7 +8,7 @@ from github_analysis.analysis.authored_activity import (
     build_pr_states,
     counts_authored_in_window,
     counts_closed_unmerged_in_window,
-    counts_merged_in_window_from_rows,
+    counts_merged_in_window,
     counts_open_at_month_end,
 )
 from github_analysis.analysis.pr_builder import build_pull_request_row
@@ -21,6 +21,7 @@ from github_analysis.cache.raw_store import save_raw_cache
 from github_analysis.catalog.search import (
     build_activity_catalog,
     build_created_in_window_catalog,
+    build_merged_in_window_catalog,
     build_open_at_month_end_candidate_catalog,
     build_review_catalog,
     group_prs_by_user,
@@ -197,41 +198,57 @@ def run_report(
     emit(f"Fetch workers: {workers}")
 
     emit("Phase 1: discovering pull requests")
+    search_warnings: list[str] = []
     try:
-        activity_catalog = build_activity_catalog(
+        activity_catalog, activity_warnings = build_activity_catalog(
             client,
             config.repository,
             config.start_date,
             config.end_date,
             merged_only=config.merged_only,
         )
-        review_catalog = build_review_catalog(
+        search_warnings.extend(activity_warnings)
+        review_catalog, review_warnings = build_review_catalog(
             client,
             config.repository,
             config.start_date,
             config.end_date,
             activity_catalog=activity_catalog,
         )
-        created_catalog = build_created_in_window_catalog(
+        search_warnings.extend(review_warnings)
+        created_catalog, created_warnings = build_created_in_window_catalog(
             client,
             config.repository,
             config.start_date,
             config.end_date,
         )
-        open_candidate_catalog = build_open_at_month_end_candidate_catalog(
+        search_warnings.extend(created_warnings)
+        merged_catalog, merged_warnings = build_merged_in_window_catalog(
             client,
             config.repository,
             config.start_date,
             config.end_date,
         )
+        search_warnings.extend(merged_warnings)
+        open_candidate_catalog, open_warnings = build_open_at_month_end_candidate_catalog(
+            client,
+            config.repository,
+            config.start_date,
+            config.end_date,
+        )
+        search_warnings.extend(open_warnings)
     except Exception as exc:
         emit_error(f"GitHub search failed: {exc}")
         raise
+
+    for warning in search_warnings:
+        emit_warn(warning)
 
     authors = sorted({login or "(unknown)" for login in activity_catalog.values()}, key=str.lower)
     emit(
         f"Phase 1 complete: {len(activity_catalog)} activity PR(s), "
         f"{len(created_catalog)} created-in-window PR(s), "
+        f"{len(merged_catalog)} merged-in-window PR(s), "
         f"{len(open_candidate_catalog)} open-at-month-end candidate PR(s), "
         f"{len(review_catalog)} PR(s) for review scan, {len(authors)} PR author(s)"
     )
@@ -290,13 +307,22 @@ def run_report(
             emit_error=emit_error,
             progress_label="open-candidate",
         )
+        merged_pr_states = build_pr_states(
+            service,
+            merged_catalog,
+            rows_by_pr,
+            workers=workers,
+            emit=emit,
+            emit_error=emit_error,
+            progress_label="merged",
+        )
         authored_counts = counts_authored_in_window(
             created_pr_states,
             start_utc=start_utc,
             end_exclusive_utc=end_exclusive_utc,
         )
-        merged_in_month_counts = counts_merged_in_window_from_rows(
-            rows,
+        merged_in_month_counts = counts_merged_in_window(
+            merged_pr_states,
             start_utc=start_utc,
             end_exclusive_utc=end_exclusive_utc,
         )
@@ -362,6 +388,7 @@ def run_report(
             created_catalog=created_catalog,
             created_pr_states=created_pr_states,
             open_pr_states=open_pr_states,
+            merged_pr_states=merged_pr_states,
             review_catalog=review_catalog,
             review_counts_by_user=review_counts,
             approval_counts_by_user=approval_counts,

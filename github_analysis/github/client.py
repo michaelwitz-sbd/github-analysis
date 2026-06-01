@@ -108,8 +108,13 @@ class GhClient:
                 break
         return items, truncated
 
-    def search_issues(self, query: str, *, max_pages: int) -> list[dict[str, Any]]:
+    def search_issues(
+        self, query: str, *, max_pages: int
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Return matching issues and whether results hit the GitHub search cap."""
         items: list[dict[str, Any]] = []
+        truncated = False
+        total_count = 0
         for page in range(1, max_pages + 1):
             data = self.get(
                 "/search/issues",
@@ -117,8 +122,15 @@ class GhClient:
             )
             if not data:
                 break
+            total_count = int(data.get("total_count") or 0)
+            if data.get("incomplete_results"):
+                truncated = True
             batch = data.get("items") or []
             items.extend(batch)
             if len(batch) < 100:
                 break
-        return items
+            if page == max_pages:
+                truncated = True
+        if total_count > len(items):
+            truncated = True
+        return items, truncated
