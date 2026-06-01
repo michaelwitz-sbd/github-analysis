@@ -18,7 +18,7 @@ This tool uses the [GitHub CLI](https://cli.github.com/) (`gh`) for all API acce
    - [Sample commands (copy-paste)](#sample-commands-copy-paste)
 8. [How the report runs (phases)](#how-the-report-runs-phases)
 9. [Performance and optimization](#performance-and-optimization)
-   - [GitHub API limits and rate limiting](#github-api-limits-and-rate-limiting)
+   - [GitHub API limits](#github-api-limits)
 10. [Understanding the output](#understanding-the-output)
 11. [Monthly metrics and `--merged-only`](#monthly-metrics-and---merged-only)
 12. [Attribution rules](#attribution-rules)
@@ -711,133 +711,43 @@ Large PRs with many commits or files add extra paginated requests. Phase 3 may f
 
 Every call spawns a **`gh api` subprocess** (`github/client.py`), so overhead adds up even when the network is fast.
 
-### GitHub API limits and rate limiting
+### GitHub API limits
 
-This tool makes two kinds of GitHub API calls: **REST** (PR details, reviews, commits) and **search** (discovering PR numbers in Phase 1 and Phase 3b). Each has different limits.
+Reports use GitHub **REST** calls (PR details, reviews) and **search** (finding PRs in Phase 1). Plan around these limits:
 
-#### Check quota before you run
+| Limit | Typical value | Affects |
+|-------|---------------|---------|
+| REST quota | 5,000 requests/hour per token | Phase 2–3 (~6 REST calls per merged PR) |
+| Search results | 1,000 matches per query | Phase 1 discovery |
+| Search throttle | ~30 requests/minute | Phase 1 |
+
+**Check quota before a large run:**
 
 ```bash
 gh api rate_limit --jq '.resources.core | "remaining=\(.remaining) reset=\(.reset)"'
 ```
 
-| `remaining` | Guidance |
-|-------------|----------|
-| **> 1,000** | Safe to start a full-month report for one busy repo |
-| **500–1,000** | OK for one repo; use `--workers 3` |
-| **< 500** | Wait for reset, or run a **short window** only (see below) |
-| **0** | Do not start a fetch — every call will fail until the hour resets |
+Prefer **`remaining > 1,000`** before a full-month report on a busy repo (~500 merged PRs ≈ 3,000–4,000 REST calls). Quota resets hourly (`date -r RESET` on macOS to read the reset time).
 
-Convert the Unix `reset` timestamp to local time (macOS): `date -r RESET`. After reset, `remaining` returns to **5,000**.
+**If a run fails**, open **`{name}_run.log`**:
 
-#### REST rate limit (5,000 requests/hour)
+| Log message | Action |
+|-------------|--------|
+| `API rate limit exceeded` | Wait for reset; re-run one repo with `--workers 3` |
+| Many `Skip PR #…` with rate-limit errors | Incomplete output — re-run after reset |
+| `Only the first 1000 search results are available` | Split the calendar window (e.g. two half-months); use distinct `-o` paths |
+| Missing `Fetch complete` or `skipped` > 0 | Do not use the output for production — re-run |
 
-Authenticated REST access is **5,000 requests per hour** per user/token. The client retries transient **429** responses automatically (`GH_API_RETRIES` in config), but once the hourly quota is exhausted you get **403** with `API rate limit exceeded` and retries will not help until reset.
+**Staying within limits:**
 
-**Rough budget per run:**
-
-| Activity | Approximate REST calls |
-|----------|------------------------|
-| One merged PR (Phase 2 detail fetch) | ~6 calls (more if many commits/files) |
-| Phase 3 review scan (PRs not in activity catalog) | ~1 call per PR |
-| Phase 3b open-at-month-end state lookup | ~1 call per candidate PR |
-| **500 merged PRs, full month** | **~3,000–4,000** calls |
-
-**Rule of thumb:** one full-month report on a busy repo (~500 merged PRs) uses most of an hour's quota. **Do not stack** multiple full-month fetches back-to-back on the same token — run **one repo at a time**, wait for reset between large runs, or use `--from-cache` for rebuilds.
-
-#### How to know you hit the REST rate limit
-
-Open **`{name}_run.log`** first. Signs include:
-
-| Symptom in `_run.log` | Meaning |
-|-----------------------|---------|
-| `API rate limit exceeded` (HTTP **403**) | Hourly REST quota exhausted |
-| Many `Skip PR #…` lines with rate-limit errors in a row | Phase 2 failed partway — output is **incomplete** |
-| `Review aggregation failed` with rate-limit error | Phase 3 failed — person summary may be missing or wrong |
-| Preflight `Cannot read repository` with rate-limit error | Quota already at **0** before the run started |
-| Run ends without `Fetch complete` / `Run log closed` after errors | Treat the run as **failed** — re-run after reset |
-
-A **partial run** may write a `_run.log` but **no** `.xlsx`, or an `.xlsx` with gaps (skipped PRs). Check `skipped N PR(s)` in the log — **0 skipped** is the pass criterion for production reports.
-
-#### REST rate limit — workarounds
-
-| Approach | When to use |
-|----------|-------------|
-| **Wait for reset** | Quota is **0** — check `gh api rate_limit` until `remaining > 1000` |
-| **Re-run once** | Previous run failed mid-fetch; do not stack retries in the same hour |
-| **`--workers 3` or `--workers 1`** | Reduce parallel load if you see 429 retries or want to leave headroom |
-| **`--merged-only`** | Smaller Phase 2 set when you only need merged PR detail |
-| **Narrow date window** | Testing/debugging: use **one week** (`--end-date` one week after `--start-date`) instead of a full month |
-| **`--from-cache`** | Rebuild TSV/Excel from `{name}_raw.json` without calling GitHub (no new fetch) |
-| **One repo at a time** | Never chain multiple full-month `run` commands in one shell loop without checking quota |
-| **Run in background** | `nohup uv run github-analysis run ... &` and `tail -f {name}_run.log` — same limits apply |
-
-**Example — safe retry after rate limit:**
-
-```bash
-# Wait until remaining > 1000, then one repo only
-gh api rate_limit --jq '.resources.core.remaining'
-
-uv run github-analysis run \
-  --repo global-user-services \
-  --start-date 2026-05-01 \
-  --end-date 2026-06-01 \
-  --merged-only \
-  --workers 3 \
-  -o ~/Documents/global-user-services-may-2026.xlsx
-```
-
-**Example — short window for testing (saves quota):**
-
-```bash
-uv run github-analysis run \
-  --repo global-services \
-  --start-date 2026-05-01 \
-  --end-date 2026-05-08 \
-  --merged-only \
-  --workers 4 \
-  -o ~/Documents/github-analysis-tests/global-services-1week.xlsx
-```
-
-#### Search result cap (1,000 results per query)
-
-Phase 1 and Phase 3b use GitHub **issue search** (`/search/issues`). GitHub returns at most **1,000 results per search query** — requesting page 11+ fails with HTTP **422**:
-
-```text
-Only the first 1000 search results are available
-```
-
-This is **not** the same as the REST hourly limit. It happens when a single query matches more than 1,000 PRs (common on very active repos over a full month, e.g. `polaris-turbo`).
-
-**How to recognize it:** Phase 1 fails immediately (~30 s) with `GitHub search failed` and the 422 message above. No Phase 2 progress, no `.xlsx`.
-
-Phase 1 uses GitHub's **inclusive calendar date range** syntax (`merged:2026-05-01..2026-05-31`), aligned with `--start-date` and the day before `--end-date`. ISO timestamp qualifiers (`merged:>=2026-05-01T04:00:00Z`) are unreliable in search — do not use them in custom queries.
-
-**Workarounds if a single query still exceeds 1,000 hits:**
-
-| Approach | Example |
-|----------|---------|
-| **Split the calendar window** | Run May 1–15 and May 16–31 separately, then combine TSVs manually or in Excel |
-| **Shorter window** | One week or two weeks often stays under 1,000 hits per query |
-| **Narrower repo / date** | Confirm with `--start-date` / `--end-date` before committing to a full month |
-
-If split runs are needed, use distinct output names (e.g. `-may-2026-w1.xlsx` and `-may-2026-w2.xlsx`) so `_raw.json` caches do not overwrite each other.
-
-#### Search rate limit (~30 requests/minute)
-
-Search endpoints also have a **secondary** throttle (~30 search requests per minute). Phase 1 runs several queries per report; on huge repos this is rarely the first failure mode, but if you see search **403/429** with retry messages, wait a minute and re-run — or split the date window.
-
-### What you can do now (no code changes)
-
-| Approach | When to use |
-|----------|-------------|
-| **`--merged-only`** | Smaller PR set when you only care about merged work |
-| **`--from-cache`** | Rebuild TSV/Excel after a successful fetch without hitting GitHub again |
-| **Narrow date window** | Weekly or bi-weekly runs instead of full months during development |
-| **Run in background** | `nohup uv run github-analysis run ... &` and monitor `_run.log` |
-| **Split by period** | Run two half-month reports if you hit the **1,000 search results** cap |
-| **Check quota first** | `gh api rate_limit` before starting; prefer `remaining > 1000` |
-| **One repo per hour** | Avoid stacking full-month fetches on the same token |
+| Practice | When |
+|----------|------|
+| One full-month **run** per repo per hour | Default for production |
+| **`--from-cache`** | Rebuild TSV/Excel from `{name}_raw.json` without new API calls |
+| **`--merged-only`** | Monthly manager reports (smaller Phase 2) |
+| **Shorter date window** | Trial runs: `--start-date 2026-05-01 --end-date 2026-05-08` |
+| **`--workers 3` or `1`** | Leave headroom or after 429 retries in the log |
+| **Run in background** | `nohup uv run github-analysis run ... &` then `tail -f {name}_run.log` |
 
 ### Parallel fetch (`--workers`)
 
@@ -1113,7 +1023,7 @@ Edit `github_analysis/config.py`:
 | `DEFAULT_FETCH_WORKERS` | `4` | Default `--workers` for Phase 2 parallel fetch |
 | `GH_API_TIMEOUT_SEC` | `90` | Per-request timeout for `gh api` |
 | `GH_API_RETRIES` | `4` | Retries on transient failures (429, 502, timeouts) |
-| `SEARCH_MAX_PAGES` | `20` | Max search pages (~2000 hits per query) |
+| `SEARCH_MAX_PAGES` | `20` | Max search pages per query (GitHub caps at 1,000 results total) |
 | `API_LIST_PAGES_MAX` | `100` | Max pages for commits/files lists per PR |
 
 After changing config, re-run reports — no reinstall needed.
@@ -1134,7 +1044,8 @@ After changing config, re-run reports — no reinstall needed.
 | Excel shows one wide column | Wrong delimiter | Import as TSV with Tab separator |
 | Very slow run | Many PRs; serial fetch (~6 API calls/PR) | Monitor `_run.log`; use `--from-cache` for rebuilds; see [Performance](#performance-and-optimization) |
 | Log stopped at `[N/492]` | Still running or hung on one PR | Wait 2–3 min; if frozen, check `gh api` manually; re-run with `--from-cache` if `_raw.json` exists |
-| `429` / rate limit | Too many API calls | Wait and retry; use `--workers 3` or `--workers 1` |
+| `429` / `API rate limit exceeded` | Hourly REST quota used up | Wait for reset; see [GitHub API limits](#github-api-limits) |
+| `Only the first 1000 search results are available` | Too many PRs match one search query | Split the date window; see [GitHub API limits](#github-api-limits) |
 
 **Diagnostic commands:**
 
@@ -1184,6 +1095,6 @@ Or use `./run_monthly_report.sh global-services 2026-05-01 2026-06-01 --merged-o
 ## Limits
 
 - **One repository per run** — run separately for each repo you track
-- **GitHub search pagination** — very large months may hit ~2000 hits per search query
+- **GitHub search pagination** — at most **1,000 results per search query**; split long date ranges if needed
 - **Reviews/comments** — first 100 items per PR inspected for timing
 - **Files/commits** — up to 10,000 per PR; truncation noted in the `notes` column
