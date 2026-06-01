@@ -2,17 +2,18 @@
 
 Pull **per-person engineering metrics** from any GitHub repository you can access: merged PRs, reviews, file-change averages, and optional PR-level detail. Output is Excel and TSV for managers and team leads.
 
-Uses the [GitHub CLI](https://cli.github.com/) (`gh`) for API access — authenticate `gh` with a token that can read the target repository.
+Uses the [GitHub CLI](https://cli.github.com/) (`gh`) for API access. See [Install and setup](#install-and-setup) for prerequisites, token setup, and verification.
 
 ---
 
 ## Quick start
 
+**Prerequisites:** [uv](https://docs.astral.sh/uv/), [GitHub CLI 2.30+](https://cli.github.com/), and a GitHub login with read access to the target repo. Full steps are in [Install and setup](#install-and-setup).
+
 ```bash
 git clone https://github.com/michaelwitz-sbd/github-analysis.git
 cd github-analysis
 uv sync --group excel
-gh auth login
 
 uv run github-analysis run \
   --repo global-services \
@@ -43,42 +44,92 @@ uv run github-analysis run \
 
 ---
 
-## Install
+## Install and setup
 
-**Requirements:** [uv](https://docs.astral.sh/uv/), [GitHub CLI 2.30+](https://cli.github.com/), network access to `github.com`.
+Everything needed before your first report: install tools, clone the project, authenticate `gh`, and verify access.
+
+### Prerequisites
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| [uv](https://docs.astral.sh/uv/) | latest | Python runtime and project dependencies |
+| [GitHub CLI](https://cli.github.com/) (`gh`) | 2.30+ | All GitHub API calls (`gh api`) |
+| GitHub account | — | Read access to the repository you will analyze |
+| Network | — | Reach `github.com` (no proxy config in this tool) |
+
+### 1. Install `uv`
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh   # macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh   # macOS / Linux
+```
+
+Restart your shell or ensure `~/.local/bin` is on your `PATH`. Windows: see [uv installation docs](https://docs.astral.sh/uv/getting-started/installation/).
+
+### 2. Install GitHub CLI (`gh`)
+
+The tool does **not** call the GitHub REST API directly — every fetch goes through `gh api`. You must install and authenticate `gh` separately.
+
+**macOS (Homebrew):**
+
+```bash
+brew install gh
+gh --version    # expect 2.30 or newer
+```
+
+**Other platforms:** [cli.github.com](https://cli.github.com/) (Windows installer, Linux packages, etc.).
+
+### 3. Clone the project and install dependencies
+
+```bash
+git clone https://github.com/michaelwitz-sbd/github-analysis.git
 cd github-analysis
 uv sync --group excel
-uv run github-analysis --version                  # expect 2.0.0
+uv run github-analysis --version    # expect 2.0.0
 ```
 
-Python 3.9+ is installed by `uv` automatically.
+`uv sync` installs Python 3.9+ automatically. The `excel` group adds `openpyxl` for `.xlsx` output.
 
----
+### 4. Authenticate with GitHub
 
-## GitHub authentication
+Reports need a token that can **read** the target repository (including private org repos).
 
-Reports call GitHub through `gh api`. Without a valid login, runs fail or return empty data.
-
-**Interactive login (typical):**
+**Option A — interactive login (typical for local use):**
 
 ```bash
-gh auth login          # GitHub.com, HTTPS, browser or token; need repo scope for private repos
+gh auth login
+```
+
+Choose: **GitHub.com** → **HTTPS** → authenticate via **browser** or **paste a token**. For private repositories, ensure the token has **`repo`** scope (classic PAT) or equivalent read access (fine-grained PAT).
+
+**Option B — personal access token (PAT):**
+
+1. Create a token at [github.com/settings/tokens](https://github.com/settings/tokens):
+   - **Classic PAT:** enable the **`repo`** scope (full control of private repositories is not required — read is enough).
+   - **Fine-grained PAT:** grant read access to **Contents** and **Pull requests** for the target repository (or org).
+2. Log in with the token:
+
+```bash
+gh auth login --with-token <<< "ghp_YOUR_TOKEN_HERE"
+```
+
+**Organization SSO:** If your org enforces SAML SSO (e.g. `Customer-Engagement-Digital-Technology`), authorize the token for that org under GitHub → **Settings** → **Applications** → **Authorized OAuth Apps** / **Personal access tokens**.
+
+**CI / automation:** Set `GH_TOKEN` or `GITHUB_TOKEN` in the environment before running `gh` or this tool — `gh` picks either variable automatically.
+
+### 5. Verify setup
+
+Run these before a large report. All should succeed without errors:
+
+```bash
 gh auth status
-gh repo view Customer-Engagement-Digital-Technology/global-services
+gh api user --jq .login
+gh repo view Customer-Engagement-Digital-Technology/global-services   # or your target repo
+uv run github-analysis --version
 ```
 
-**Personal access token:** create at [github.com/settings/tokens](https://github.com/settings/tokens) with **`repo`** scope (classic) or read access to Contents + Pull requests (fine-grained). Then:
+`gh auth status` should show a logged-in account with `Token scopes` including `repo` (or sufficient fine-grained permissions). If `gh repo view` returns 404, fix token scope or SSO authorization before running a report.
 
-```bash
-gh auth login --with-token <<< "ghp_YOUR_TOKEN"
-```
-
-**Organization SSO:** authorize the token for your org (e.g. `Customer-Engagement-Digital-Technology`) under GitHub → Settings → Applications.
-
-**CI / scripts:** set `GH_TOKEN` or `GITHUB_TOKEN` before running `gh`.
+Each run also performs a **preflight** check (auth + repo read access) and writes the result to `_run.log`.
 
 ---
 
@@ -350,9 +401,9 @@ Edit `github_analysis/config.py`:
 
 | Symptom | Fix |
 |---------|-----|
-| `uv` / `gh` not found | Install and ensure on PATH |
-| `gh auth status` fails | `gh auth login` or set `GH_TOKEN` |
-| `401` / `403` / `404` on org repo | PAT with `repo` scope; authorize SSO for the org |
+| `uv` / `gh` not found | Complete [Install and setup](#install-and-setup) steps 1–2; ensure both are on `PATH` |
+| `gh auth status` fails | Step 4: `gh auth login` or `gh auth login --with-token`; set `GH_TOKEN` for CI |
+| `401` / `403` / `404` on org repo | PAT needs `repo` scope (classic) or read Contents + Pull requests (fine-grained); authorize org SSO |
 | `openpyxl is required` | `uv sync --group excel` |
 | Empty report | Widen dates; confirm activity in the window |
 | Very slow / stuck at `[N/M]` | Normal for large months; wait or check `_run.log` |
