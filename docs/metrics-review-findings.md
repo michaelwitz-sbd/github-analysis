@@ -1,8 +1,7 @@
 # Metrics review — findings and recommendations
 
 **Review date:** 2026-06-01  
-**Scope:** Person-summary metrics semantics, code quality, documentation accuracy, and gaps between the two.  
-**Reference:** [metrics-review-handoff.md](metrics-review-handoff.md)
+**Scope:** Person-summary metrics semantics, code quality, documentation accuracy, and gaps between the two.
 
 ---
 
