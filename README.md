@@ -19,10 +19,11 @@ This tool uses the [GitHub CLI](https://cli.github.com/) (`gh`) for all API acce
 8. [How the report runs (phases)](#how-the-report-runs-phases)
 9. [Performance and optimization](#performance-and-optimization)
 10. [Understanding the output](#understanding-the-output)
-11. [Attribution rules](#attribution-rules)
-12. [Configuration](#configuration)
-13. [Troubleshooting](#troubleshooting)
-14. [Extending the CLI](#extending-the-cli)
+11. [Monthly metrics and `--merged-only`](#monthly-metrics-and---merged-only)
+12. [Attribution rules](#attribution-rules)
+13. [Configuration](#configuration)
+14. [Troubleshooting](#troubleshooting)
+15. [Extending the CLI](#extending-the-cli)
 
 ---
 
@@ -66,7 +67,7 @@ uv run github-analysis run \
 | `--repo` | HTTPS URL (or `global-services` short name) | Repository to analyze |
 | `--start-date` | `2026-05-01` | First calendar day **included** (US Eastern) |
 | `--end-date` | `2026-06-01` | First calendar day **excluded** → all of May 2026 |
-| `--merged-only` | (flag) | Only PRs **merged** in that window |
+| `--merged-only` | (flag) | **PR detail sheet:** only PRs **merged** in the window. **Person summary:** still computes `prs_authored`, `prs_open`, and review counts separately (see [Monthly metrics](#monthly-metrics-and---merged-only)) |
 | `--workers` | `4` | Parallel fetch threads (default; omit to use 4) |
 | `-o` | path to `.xlsx` | Excel output; siblings share the same base name |
 
@@ -82,7 +83,7 @@ Creates:
 
 **If something fails, open `{name}_run.log` first.** It records GitHub authentication status, repository access checks, skipped PRs, and every person included in the summary.
 
-Rebuild TSV/Excel from cache without re-fetching (person summaries are **recomputed** from cached PR rows, so new summary columns appear without calling GitHub again):
+Rebuild TSV/Excel from cache without re-fetching merged PR detail. Person summaries are **recomputed** from cached timestamp data (`created_pr_states`, `open_pr_states`). If an old cache lacks `open_pr_states`, re-run a full **`run`** once to populate it.
 
 ```bash
 cd ~/Dev/github-analysis
@@ -650,7 +651,7 @@ uv run github-analysis export \
 | `--owner` | analyze, run | Org/user when `--repo` is short name only |
 | `--start-date` | analyze, run | Start date inclusive (`YYYY-MM-DD`) |
 | `--end-date` | analyze, run | End date exclusive (`YYYY-MM-DD`) |
-| `--merged-only` | analyze, run | Only PRs **merged** in the window |
+| `--merged-only` | analyze, run | **Detail report:** fetch only PRs **merged** in the window. **Summary columns** `prs_authored` / `prs_open` / reviews use their own searches (see [Monthly metrics](#monthly-metrics-and---merged-only)) |
 | `--no-summary` | analyze | Skip team summary TSV |
 | `-o`, `--output` | run | **Excel** path (`.xlsx`); also writes `{name}.tsv` and `{name}_person_summary.tsv` |
 | `-o`, `--output` | analyze | **Detail TSV** path (`-` = stdout) |
@@ -674,7 +675,8 @@ Each `analyze` or `run` command goes through three phases. Progress is written t
 | **Preflight** | `gh auth status`, verify read access to the repo | Seconds |
 | **Phase 1 — Discover** | GitHub search finds PR numbers in the date window; builds author catalog | ~30 s for busy months |
 | **Phase 2 — Fetch details** | For each PR: pull detail, commits, files, events, reviews, comments | **Dominates runtime** (~3 s/PR serial, ~6–10 min with 4 workers for ~500 PRs) |
-| **Phase 3 — Summarize** | Count reviewers/approvers in window; roll up per-person metrics | Seconds to ~1 min |
+| **Phase 3 — Summarize** | Count reviewers/approvers; roll up per-person metrics | Seconds |
+| **Phase 3b — Open at month-end** | Search and fetch PRs that may still have been open at window end (any create date) | ~1–5 min |
 | **Write outputs** | TSV files, optional raw JSON cache, then Excel on `run` | Seconds |
 
 **Monitor progress:**
@@ -774,27 +776,22 @@ File: `{name}_person_summary.tsv` — Excel sheet **Individual Production**.
 | Column | Meaning |
 |--------|---------|
 | `user` | GitHub login |
-| `prs_merged` | PRs **created by** this person that **merged** in the window |
+| `prs_merged` | PRs they **opened** that **merged** in the calendar window |
 | `prs_reviewed` | Distinct PRs where this person **submitted any review** in the window |
 | `prs_approved` | Distinct PRs where this person submitted an **APPROVED** review in the window |
-| `prs_authored` | PRs they **created** in the window |
-| `prs_open` | Authored PRs still open or closed without merge |
-| `avg_files_added_per_pr` | Mean **new files** (`status: added`) per **authored** PR |
-| `avg_files_changed_per_pr` | Mean **modified/renamed** files per **authored** PR (excludes adds and deletions) |
-| `min_hours_created_to_merged` | Shortest time (**hours**) from PR open to merge, over **authored merged** PRs |
-| `max_hours_created_to_merged` | Longest time (**hours**) from PR open to merge, over authored merged PRs |
-| `avg_hours_created_to_merged` | Mean time (**hours**) from PR open to merge, over authored merged PRs |
+| `prs_authored` | PRs they **opened** in the calendar window (May 1–31 for a May report) |
+| `prs_open` | PRs **still open at month-end** — see [Monthly metrics](#monthly-metrics-and---merged-only) |
+| `avg_files_added_per_pr` | Mean **new files** per PR in the **detail report** (merged PRs when `--merged-only`) |
+| `avg_files_changed_per_pr` | Mean **modified/renamed** files per PR in the **detail report** |
+| `min_hours_pr_created_to_merged` | Shortest **hours** from PR open to merge, over PRs **merged in the window** |
+| `max_hours_pr_created_to_merged` | Longest **hours** from PR open to merge, over PRs **merged in the window** |
+| `avg_hours_pr_created_to_merged` | Mean **hours** from PR open to merge, over PRs **merged in the window** |
 
-**Added vs changed:** GitHub classifies each file in a PR diff as `added`, `modified`/`renamed`, or `removed`.
-
-- **`avg_files_added_per_pr`** — brand-new files only  
-- **`avg_files_changed_per_pr`** — existing files edited or renamed (not new, not deleted)
-
-**Merge cycle time:** computed from each PR’s `pr_created` and `merged` timestamps (hours, 2 decimal places). Only **authored** PRs that merged with both timestamps count. Blank when the person has no qualifying merged PRs.
-
-Blank file averages mean the person **authored no PRs** in the window (they may still appear with review/approval counts).
+**Merge cycle time** (`min/max/avg_hours_pr_created_to_merged`): uses only PRs **merged in the calendar window**. Does **not** include **`prs_open`** PRs (still open at month-end) or PRs merged after the window. Blank when the person has no qualifying merges.
 
 Review and approval counts use review **`submitted_at`** inside your date window, not PR merge date.
+
+For a full explanation of **`prs_authored`**, **`prs_open`**, and **`--merged-only`**, see the next section.
 
 ### PR detail (optional)
 
@@ -820,7 +817,82 @@ The detail file also includes lifecycle timestamps (opened, first feedback, appr
 
 ---
 
-## Attribution rules
+## Monthly metrics and `--merged-only`
+
+### What `--merged-only` does (and does not do)
+
+**Does:**
+
+- Limits the **PR detail** sheet / `.tsv` to PRs **merged during the calendar window**
+- Limits **Phase 2** fetch to those merged PRs (faster, focused production report)
+- Drives **file averages** and **merge-cycle time** columns (from detail rows)
+
+**Does not:**
+
+- Turn off **`prs_authored`**, **`prs_open`**, or **review/approval** counts — those use **separate GitHub searches** in Phase 1 and Phase 3b
+
+Recommended for monthly manager reports:
+
+```bash
+uv run github-analysis run \
+  --repo global-services \
+  --start-date 2026-05-01 \
+  --end-date 2026-06-01 \
+  --merged-only \
+  --workers 4 \
+  -o ~/Documents/global-services-may-2026.xlsx
+```
+
+### Person summary columns — three different questions
+
+| Column | Question it answers | Time scope |
+|--------|---------------------|------------|
+| **`prs_merged`** | How many PRs they **merged** this month? | Merged in calendar window |
+| **`prs_authored`** | How many PRs did they **open** this month? | Created in calendar window |
+| **`prs_open`** | How many of their PRs were **still open at month-end**? | Snapshot at window end; **any** create date |
+
+These are **not** the same number. Example for May 2026:
+
+| Person | Activity | `prs_authored` | `prs_merged` | `prs_open` at May 31 |
+|--------|----------|----------------|--------------|----------------------|
+| Alice | Opened 8 in May; merged 5 in May; 2 still open; 1 closed unmerged | 8 | 5 | 3 (2 open + 1 opened April, still open) |
+| Bob | Opened 3 in May; all merged in May; also has 1 April PR still open | 3 | 3 | 1 (April PR only) |
+| Carol | Reviewed only; no May PRs | 0 | 0 | 0 or more (old open PRs still count) |
+
+### How `prs_open` is calculated
+
+**Month-end** = last instant of the report window (e.g. `2026-06-01 00:00` US Eastern for all of May).
+
+A PR counts toward **`prs_open`** for its creator if, at that instant:
+
+1. The PR **already existed** (`created_at` before month-end) — **any** month, not just the report month  
+2. It had **not merged yet** (`merged_at` is empty or after month-end)  
+3. It was **not closed without merge** before month-end (abandoned PRs closed in May do not count)
+
+**Includes:**
+
+- Opened in **April**, still open on **May 31**  
+- Opened in **May**, merged in **June** (still open at May 31)  
+- Opened in **May**, still open at **May 31**
+
+**Excludes:**
+
+- Merged in May (finished before month-end)  
+- Opened in May but **closed without merge** before May 31  
+
+The tool discovers candidate PRs via GitHub search (still open, merged after window, closed after window, etc.), then confirms each with PR timestamps.
+
+### File averages vs merge cycle time vs summary counts
+
+| Metric | Source | Includes `prs_open`? |
+|--------|--------|----------------------|
+| `avg_files_*` | **Detail report** rows (merged PRs when `--merged-only`) | No |
+| `min/max/avg_hours_pr_created_to_merged` | PRs **merged in the calendar window** only | **No** — excludes still-open and late-merged PRs |
+| `prs_authored`, `prs_merged`, `prs_open`, reviews | **Separate searches** and timestamp logic | N/A |
+
+A reviewer with no merged PR rows can still have **`prs_reviewed`** and a non-zero **`prs_open`** (from an older PR still in flight).
+
+---
 
 These rules drive manager-facing numbers. They are intentional — do not use assignees or commit authors for “who did the work.”
 
@@ -829,10 +901,11 @@ These rules drive manager-facing numbers. They are intentional — do not use as
 | **PR author / creator** | GitHub `user` on the pull request (who opened it) | Assignees, merge committer |
 | **Reviewer** | Anyone who submitted a review (`submitted_at` in window) | Review comments without a formal review |
 | **Approver** | Review with `state: APPROVED` in window | LGTM comments, CODEOWNERS without review |
-| **File averages** | Mean over PRs **authored** by that person | Reviewed-only contributors get blank averages |
-| **Merge cycle time** | Min/max/avg hours from PR open to merge on **authored merged** PRs | PRs missing `created_at` or `merged_at` |
+| **File averages** | Mean over PRs in the **detail report** | Reviewed-only contributors get blank averages |
+| **Merge cycle time** | Min/max/avg hours from PR open to merge on PRs **merged in the window** | **`prs_open`** PRs, PRs merged after the window, missing timestamps |
+| **`prs_open`** | PRs still **open at month-end** (any create date before window end) | PRs merged or closed unmerged before month-end; assignees |
 
-The run log lists every person in the summary with merged / reviewed / approved / authored counts for audit.
+The run log lists every person with merged, reviewed, approved, authored, and **open_at_month_end** counts for audit.
 
 ---
 

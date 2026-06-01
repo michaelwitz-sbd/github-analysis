@@ -4,6 +4,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from typing import Any, Optional
 
+from github_analysis.analysis.authored_activity import (
+    build_pr_states,
+    counts_authored_and_merged_in_window,
+    counts_open_at_month_end,
+)
 from github_analysis.analysis.pr_builder import build_pull_request_row
 from github_analysis.analysis.reviews import (
     collect_approval_counts_by_user,
@@ -13,6 +18,8 @@ from github_analysis.analysis.summaries import compute_user_summaries
 from github_analysis.cache.raw_store import save_raw_cache
 from github_analysis.catalog.search import (
     build_activity_catalog,
+    build_created_in_window_catalog,
+    build_open_at_month_end_candidate_catalog,
     build_review_catalog,
     group_prs_by_user,
 )
@@ -65,9 +72,10 @@ def _log_person_coverage(
             f"reviewed={summary.prs_reviewed}, "
             f"approved={summary.prs_approved}, "
             f"authored={summary.prs_authored}, "
-            f"avg_hours_created_to_merged={summary.avg_hours_created_to_merged or '-'}, "
-            f"min_hours_created_to_merged={summary.min_hours_created_to_merged or '-'}, "
-            f"max_hours_created_to_merged={summary.max_hours_created_to_merged or '-'}, "
+            f"open_at_month_end={summary.prs_open}, "
+            f"avg_hours_pr_created_to_merged={summary.avg_hours_pr_created_to_merged or '-'}, "
+            f"min_hours_pr_created_to_merged={summary.min_hours_pr_created_to_merged or '-'}, "
+            f"max_hours_pr_created_to_merged={summary.max_hours_pr_created_to_merged or '-'}, "
             f"avg_files_added_per_pr={summary.avg_files_added_per_pr or '-'}, "
             f"avg_files_changed_per_pr={summary.avg_files_changed_per_pr or '-'}"
         )
@@ -201,6 +209,18 @@ def run_report(
             end_exclusive_utc,
             activity_catalog=activity_catalog,
         )
+        created_catalog = build_created_in_window_catalog(
+            client,
+            config.repository,
+            start_utc,
+            end_exclusive_utc,
+        )
+        open_candidate_catalog = build_open_at_month_end_candidate_catalog(
+            client,
+            config.repository,
+            start_utc,
+            end_exclusive_utc,
+        )
     except Exception as exc:
         emit_error(f"GitHub search failed: {exc}")
         raise
@@ -208,6 +228,8 @@ def run_report(
     authors = sorted({login or "(unknown)" for login in activity_catalog.values()}, key=str.lower)
     emit(
         f"Phase 1 complete: {len(activity_catalog)} activity PR(s), "
+        f"{len(created_catalog)} created-in-window PR(s), "
+        f"{len(open_candidate_catalog)} open-at-month-end candidate PR(s), "
         f"{len(review_catalog)} PR(s) for review scan, {len(authors)} PR author(s)"
     )
     for author in authors:
@@ -244,7 +266,57 @@ def run_report(
         emit_error(f"Review aggregation failed: {exc}")
         raise
 
-    summaries = compute_user_summaries(rows, review_counts, approval_counts)
+    emit("Phase 3b: authored, merged-in-window, and open-at-month-end counts")
+    rows_by_pr = {row.pr_number: row for row in rows}
+    try:
+        created_pr_states = build_pr_states(
+            service,
+            created_catalog,
+            rows_by_pr,
+            workers=workers,
+            emit=emit,
+            emit_error=emit_error,
+            progress_label="created",
+        )
+        open_pr_states = build_pr_states(
+            service,
+            open_candidate_catalog,
+            rows_by_pr,
+            workers=workers,
+            emit=emit,
+            emit_error=emit_error,
+            progress_label="open-candidate",
+        )
+        authored_counts, merged_in_month_counts = counts_authored_and_merged_in_window(
+            created_pr_states,
+            start_utc=start_utc,
+            end_exclusive_utc=end_exclusive_utc,
+        )
+        open_at_end_counts = counts_open_at_month_end(
+            open_pr_states,
+            end_exclusive_utc=end_exclusive_utc,
+        )
+        created_pr_states.update(
+            {
+                number: state
+                for number, state in open_pr_states.items()
+                if number not in created_pr_states
+            }
+        )
+    except Exception as exc:
+        emit_error(f"Authored/open-at-month-end aggregation failed: {exc}")
+        raise
+
+    summaries = compute_user_summaries(
+        rows,
+        review_counts,
+        approval_counts,
+        start_utc=start_utc,
+        end_exclusive_utc=end_exclusive_utc,
+        authored_in_month_by_user=authored_counts,
+        merged_in_month_by_user=merged_in_month_counts,
+        open_at_month_end_by_user=open_at_end_counts,
+    )
     emit(
         f"Fetch complete: {len(rows)} detail row(s); {len(summaries)} person row(s); "
         f"skipped {len(skipped)} PR(s)"
@@ -273,6 +345,9 @@ def run_report(
             raw_cache_path,
             result=result,
             activity_catalog=activity_catalog,
+            created_catalog=created_catalog,
+            created_pr_states=created_pr_states,
+            open_pr_states=open_pr_states,
             review_catalog=review_catalog,
             review_counts_by_user=review_counts,
             approval_counts_by_user=approval_counts,

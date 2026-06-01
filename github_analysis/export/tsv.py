@@ -119,10 +119,13 @@ def write_summary_tsv(summaries: list[UserSummary], fh: TextIO, config: ReportCo
         "One row per person (GitHub login) for individual production evaluation. "
         "PR counts: prs_merged = PRs they authored that merged; prs_reviewed = distinct PRs they reviewed; "
         "prs_approved = distinct PRs where they submitted an APPROVED review. "
+        "prs_authored = PRs they opened in the calendar window; prs_open = PRs still open at month-end "
+        "(existed before window end; not merged or closed unmerged before window end — any create date). "
         "File columns are means per authored PR (not repo-wide totals): "
         "avg_files_added_per_pr = new files; avg_files_changed_per_pr = modified/renamed files "
         "(excludes new files and deletions). "
-        "min/max/avg_hours_created_to_merged = hours from PR open to merge over authored merged PRs. "
+        "min/max/avg_hours_pr_created_to_merged = hours from PR open to merge on PRs merged in the window only "
+        "(excludes prs_open / still-open-at-month-end PRs). "
         "Blank when the person authored no merged PRs in the window.\n"
     )
     headers = [
@@ -134,9 +137,9 @@ def write_summary_tsv(summaries: list[UserSummary], fh: TextIO, config: ReportCo
         "prs_open",
         "avg_files_added_per_pr",
         "avg_files_changed_per_pr",
-        "min_hours_created_to_merged",
-        "max_hours_created_to_merged",
-        "avg_hours_created_to_merged",
+        "min_hours_pr_created_to_merged",
+        "max_hours_pr_created_to_merged",
+        "avg_hours_pr_created_to_merged",
     ]
     fh.write("\t".join(headers) + "\n")
     for summary in summaries:
@@ -151,9 +154,9 @@ def write_summary_tsv(summaries: list[UserSummary], fh: TextIO, config: ReportCo
                     str(summary.prs_open),
                     summary.avg_files_added_per_pr,
                     summary.avg_files_changed_per_pr,
-                    summary.min_hours_created_to_merged,
-                    summary.max_hours_created_to_merged,
-                    summary.avg_hours_created_to_merged,
+                    summary.min_hours_pr_created_to_merged,
+                    summary.max_hours_pr_created_to_merged,
+                    summary.avg_hours_pr_created_to_merged,
                 ]
             )
             + "\n"

@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
+from github_analysis.analysis.authored_activity import (
+    counts_authored_and_merged_in_window,
+    counts_open_at_month_end,
+)
 from github_analysis.analysis.summaries import compute_user_summaries
 from github_analysis.models import (
     PullRequestRow,
@@ -82,10 +86,50 @@ def _summary_from_dict(data: dict[str, Any]) -> UserSummary:
         prs_open=int(data["prs_open"]),
         avg_files_added_per_pr=data.get("avg_files_added_per_pr", ""),
         avg_files_changed_per_pr=data.get("avg_files_changed_per_pr", ""),
-        min_hours_created_to_merged=data.get("min_hours_created_to_merged", ""),
-        max_hours_created_to_merged=data.get("max_hours_created_to_merged", ""),
-        avg_hours_created_to_merged=data.get("avg_hours_created_to_merged", ""),
+        min_hours_pr_created_to_merged=data.get(
+            "min_hours_pr_created_to_merged", data.get("min_hours_created_to_merged", "")
+        ),
+        max_hours_pr_created_to_merged=data.get(
+            "max_hours_pr_created_to_merged", data.get("max_hours_created_to_merged", "")
+        ),
+        avg_hours_pr_created_to_merged=data.get(
+            "avg_hours_pr_created_to_merged", data.get("avg_hours_created_to_merged", "")
+        ),
     )
+
+
+def _created_pr_states_to_json(
+    states: dict[int, dict[str, object]],
+) -> dict[str, dict[str, Any]]:
+    payload: dict[str, dict[str, Any]] = {}
+    for pull_number, state in states.items():
+        payload[str(pull_number)] = {
+            "author": state.get("author", ""),
+            "pr_created": _dt_to_json(
+                state.get("pr_created") if isinstance(state.get("pr_created"), datetime) else None
+            ),
+            "merged": _dt_to_json(
+                state.get("merged") if isinstance(state.get("merged"), datetime) else None
+            ),
+            "closed_at": _dt_to_json(
+                state.get("closed_at") if isinstance(state.get("closed_at"), datetime) else None
+            ),
+        }
+    return payload
+
+
+def _created_pr_states_from_json(
+    data: dict[str, dict[str, Any]],
+) -> dict[int, dict[str, object]]:
+    states: dict[int, dict[str, object]] = {}
+    for key, state in data.items():
+        states[int(key)] = {
+            "author": state.get("author", ""),
+            "pr_created": _dt_from_json(state.get("pr_created")),
+            "merged": _dt_from_json(state.get("merged")),
+            "closed_at": _dt_from_json(state.get("closed_at")),
+        }
+    return states
 
 
 def save_raw_cache(
@@ -96,6 +140,9 @@ def save_raw_cache(
     review_catalog: dict[int, str],
     review_counts_by_user: dict[str, int],
     approval_counts_by_user: dict[str, int] | None = None,
+    created_catalog: dict[int, str] | None = None,
+    created_pr_states: dict[int, dict[str, object]] | None = None,
+    open_pr_states: dict[int, dict[str, object]] | None = None,
 ) -> None:
     """Persist fetched GitHub data before writing TSV/Excel outputs."""
     config = result.config
@@ -114,6 +161,9 @@ def save_raw_cache(
         "start_utc": _dt_to_json(result.start_utc),
         "end_exclusive_utc": _dt_to_json(result.end_exclusive_utc),
         "activity_catalog": {str(k): v for k, v in activity_catalog.items()},
+        "created_catalog": {str(k): v for k, v in (created_catalog or {}).items()},
+        "created_pr_states": _created_pr_states_to_json(created_pr_states or {}),
+        "open_pr_states": _created_pr_states_to_json(open_pr_states or {}),
         "review_catalog": {str(k): v for k, v in review_catalog.items()},
         "review_counts_by_user": review_counts_by_user,
         "approval_counts_by_user": approval_counts_by_user or {},
@@ -144,12 +194,45 @@ def load_raw_cache(path: str) -> ReportResult:
     approval_counts = {
         key: int(value) for key, value in (payload.get("approval_counts_by_user") or {}).items()
     }
-    summaries = compute_user_summaries(rows, review_counts, approval_counts)
+    start_utc = _dt_from_json(payload.get("start_utc"))
+    end_exclusive_utc = _dt_from_json(payload.get("end_exclusive_utc"))
+    created_pr_states = _created_pr_states_from_json(payload.get("created_pr_states") or {})
+    open_pr_states = _created_pr_states_from_json(payload.get("open_pr_states") or {})
+    if not open_pr_states:
+        open_pr_states = created_pr_states
+    if created_pr_states and start_utc and end_exclusive_utc:
+        authored_counts, merged_in_month_counts = counts_authored_and_merged_in_window(
+            created_pr_states,
+            start_utc=start_utc,
+            end_exclusive_utc=end_exclusive_utc,
+        )
+        open_at_end_counts = counts_open_at_month_end(
+            open_pr_states,
+            end_exclusive_utc=end_exclusive_utc,
+        )
+        summaries = compute_user_summaries(
+            rows,
+            review_counts,
+            approval_counts,
+            start_utc=start_utc,
+            end_exclusive_utc=end_exclusive_utc,
+            authored_in_month_by_user=authored_counts,
+            merged_in_month_by_user=merged_in_month_counts,
+            open_at_month_end_by_user=open_at_end_counts,
+        )
+    else:
+        summaries = compute_user_summaries(
+            rows,
+            review_counts,
+            approval_counts,
+            start_utc=start_utc,
+            end_exclusive_utc=end_exclusive_utc,
+        )
     return ReportResult(
         config=config,
         rows=rows,
         summaries=summaries,
         skipped_pr_numbers=[int(n) for n in payload.get("skipped_pr_numbers", [])],
-        start_utc=_dt_from_json(payload.get("start_utc")),
-        end_exclusive_utc=_dt_from_json(payload.get("end_exclusive_utc")),
+        start_utc=start_utc,
+        end_exclusive_utc=end_exclusive_utc,
     )
