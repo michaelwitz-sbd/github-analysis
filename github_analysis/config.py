@@ -18,3 +18,6 @@ GH_API_RETRIES = 4
 GH_API_RETRY_BASE_SEC = 2
 API_LIST_PAGES_MAX = 100  # × 100 items/page
 SEARCH_MAX_PAGES = 20
+
+# Parallel PR detail fetch (Phase 2). 4 is a balance of speed vs GitHub rate limits.
+DEFAULT_FETCH_WORKERS = 4

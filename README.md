@@ -15,21 +15,91 @@ This tool uses the [GitHub CLI](https://cli.github.com/) (`gh`) for all API acce
 5. [Project structure](#project-structure)
 6. [CLI commands](#cli-commands)
 7. [Running reports](#running-reports)
-8. [Understanding the output](#understanding-the-output)
-9. [Configuration](#configuration)
-10. [Troubleshooting](#troubleshooting)
-11. [Extending the CLI](#extending-the-cli)
+   - [Sample commands (copy-paste)](#sample-commands-copy-paste)
+8. [How the report runs (phases)](#how-the-report-runs-phases)
+9. [Performance and optimization](#performance-and-optimization)
+10. [Understanding the output](#understanding-the-output)
+11. [Attribution rules](#attribution-rules)
+12. [Configuration](#configuration)
+13. [Troubleshooting](#troubleshooting)
+14. [Extending the CLI](#extending-the-cli)
 
 ---
 
 ## What you get
 
-Each report run writes files to **`~/Documents`** by default (override with `--output-dir`):
+Each report run writes files to **`~/Documents`** by default.
 
-| File | Audience | Contents |
-|------|----------|----------|
-| `*_team_summary.tsv` / Excel **Team Summary** sheet | Managers | **One row per GitHub user** — merged PRs, reviews, average file counts |
-| `*.tsv` / Excel **PR Detail** sheet | Deep dives | One row per pull request — lifecycle timing, file counts, URLs |
+### Output file formats
+
+| Format | Extension | When | Best for |
+|--------|-----------|------|----------|
+| **Excel workbook** | `.xlsx` | `run` or `export` | **Managers** — open directly in Excel; not legacy `.xls` |
+| **Tab-separated text** | `.tsv` | `analyze` or `run` | Spreadsheets, scripting, or re-exporting to Excel |
+
+The **`run`** command (recommended) produces these files in the **same output directory**:
+
+| File | Purpose |
+|------|---------|
+| `{name}.xlsx` | Excel workbook — **Individual Production** + **PR Detail** sheets |
+| `{name}_person_summary.tsv` | One row per person (individual production metrics) |
+| `{name}.tsv` | One row per pull request (detail) |
+| `{name}_raw.json` | Raw fetched data (cache — reuse without re-calling GitHub) |
+| `{name}_run.log` | **Run log** — auth checks, errors, skipped PRs, person list |
+
+Specify the Excel path with **`-o`**; sibling files share the same base name:
+
+```bash
+cd ~/Dev/github-analysis
+
+uv run github-analysis run \
+  --repo https://github.com/Customer-Engagement-Digital-Technology/global-services.git \
+  --start-date 2026-05-01 \
+  --end-date 2026-06-01 \
+  --merged-only \
+  --workers 4 \
+  -o ~/Documents/global-services-may-2026.xlsx
+```
+
+| Parameter | Value | Meaning |
+|-----------|-------|---------|
+| `--repo` | HTTPS URL (or `global-services` short name) | Repository to analyze |
+| `--start-date` | `2026-05-01` | First calendar day **included** (US Eastern) |
+| `--end-date` | `2026-06-01` | First calendar day **excluded** → all of May 2026 |
+| `--merged-only` | (flag) | Only PRs **merged** in that window |
+| `--workers` | `4` | Parallel fetch threads (default; omit to use 4) |
+| `-o` | path to `.xlsx` | Excel output; siblings share the same base name |
+
+Creates:
+
+```
+~/Documents/global-services-may-2026.xlsx
+~/Documents/global-services-may-2026_person_summary.tsv
+~/Documents/global-services-may-2026.tsv
+~/Documents/global-services-may-2026_raw.json
+~/Documents/global-services-may-2026_run.log
+```
+
+**If something fails, open `{name}_run.log` first.** It records GitHub authentication status, repository access checks, skipped PRs, and every person included in the summary.
+
+Rebuild TSV/Excel from cache without re-fetching:
+
+```bash
+cd ~/Dev/github-analysis
+
+uv run github-analysis analyze \
+  --from-cache ~/Documents/global-services-may-2026_raw.json \
+  --repo global-services \
+  --start-date 2026-05-01 \
+  --end-date 2026-06-01 \
+  --merged-only \
+  -o ~/Documents/global-services-may-2026.tsv
+
+uv run github-analysis export \
+  --summary ~/Documents/global-services-may-2026_person_summary.tsv \
+  --detail ~/Documents/global-services-may-2026.tsv \
+  -o ~/Documents/global-services-may-2026.xlsx
+```
 
 ---
 
@@ -229,15 +299,22 @@ github-analysis/
     │
     ├── github/                 # GitHub API layer (via `gh api`)
     │   ├── client.py           # HTTP client with retries
+    │   ├── preflight.py        # Auth and repo access checks before fetch
     │   └── pulls.py            # Pull request, commit, file, review endpoints
     │
     ├── catalog/                # PR discovery
     │   └── search.py           # GitHub issue search (merged, created, updated)
     │
     ├── analysis/               # Metrics computation
-    │   ├── pr_builder.py       # Build one row per PR
-    │   ├── reviews.py          # Count reviews by person in date window
-    │   └── summaries.py        # Roll up per-person team summary
+    │   ├── pr_builder.py       # Build one row per PR (creator, files, timeline)
+    │   ├── reviews.py          # Count reviews and approvals by person
+    │   └── summaries.py        # Roll up per-person individual production
+    │
+    ├── cache/                  # Raw JSON cache for offline rebuild
+    │   └── raw_store.py
+    │
+    ├── logging/                # Run log writer
+    │   └── run_log.py
     │
     ├── export/                 # Output writers
     │   ├── paths.py            # Default filenames and paths
@@ -245,7 +322,7 @@ github-analysis/
     │   └── xlsx.py             # Write Excel workbook (requires openpyxl)
     │
     └── pipeline/
-        └── runner.py           # Orchestrates catalog → analysis → result
+        └── runner.py           # Orchestrates catalog → fetch → summary
 ```
 
 **Data flow:**
@@ -281,6 +358,117 @@ uv run github-analysis run --help
 
 ## Running reports
 
+### Sample commands (copy-paste)
+
+Run from the project directory after `uv sync --group excel` and `gh auth login`.
+
+#### Monthly merged-PR report (recommended)
+
+All PRs **merged in May 2026** on `global-services`, with explicit output path and parallel fetch:
+
+```bash
+cd ~/Dev/github-analysis
+
+uv run github-analysis run \
+  --repo https://github.com/Customer-Engagement-Digital-Technology/global-services.git \
+  --start-date 2026-05-01 \
+  --end-date 2026-06-01 \
+  --merged-only \
+  --workers 4 \
+  -o ~/Documents/global-services-may-2026.xlsx
+```
+
+Same report using the **short repo name** (default org from `config.py`):
+
+```bash
+uv run github-analysis run \
+  --repo global-services \
+  --owner Customer-Engagement-Digital-Technology \
+  --start-date 2026-05-01 \
+  --end-date 2026-06-01 \
+  --merged-only \
+  --workers 4 \
+  -o ~/Documents/global-services-may-2026.xlsx
+```
+
+Auto-named files in `~/Documents` (omit `-o`):
+
+```bash
+uv run github-analysis run \
+  --repo global-services \
+  --start-date 2026-05-01 \
+  --end-date 2026-06-01 \
+  --merged-only \
+  --workers 4 \
+  --output-dir ~/Documents
+```
+
+Creates `global-services_2026-05-01_to_2026-06-01.xlsx` plus sibling TSV, `_raw.json`, and `_run.log`.
+
+#### Analyze only (TSV + cache, no Excel)
+
+```bash
+uv run github-analysis analyze \
+  --repo global-services \
+  --start-date 2026-05-01 \
+  --end-date 2026-06-01 \
+  --merged-only \
+  --workers 4 \
+  -o ~/Documents/global-services-may-2026.tsv
+```
+
+#### Export only (TSV → Excel)
+
+After `analyze` or when TSV files already exist:
+
+```bash
+uv run github-analysis export \
+  --summary ~/Documents/global-services-may-2026_person_summary.tsv \
+  --detail ~/Documents/global-services-may-2026.tsv \
+  -o ~/Documents/global-services-may-2026.xlsx
+```
+
+Manager view — **Individual Production sheet only** (no PR detail):
+
+```bash
+uv run github-analysis export \
+  --summary ~/Documents/global-services-may-2026_person_summary.tsv \
+  --summary-only \
+  -o ~/Documents/global-services-may-2026-managers.xlsx
+```
+
+#### Rebuild from cache (no GitHub fetch)
+
+```bash
+uv run github-analysis analyze \
+  --from-cache ~/Documents/global-services-may-2026_raw.json \
+  --repo global-services \
+  --start-date 2026-05-01 \
+  --end-date 2026-06-01 \
+  --merged-only \
+  -o ~/Documents/global-services-may-2026.tsv
+```
+
+#### Serial fetch (debugging or rate-limit issues)
+
+```bash
+uv run github-analysis run \
+  --repo global-services \
+  --start-date 2026-05-01 \
+  --end-date 2026-06-01 \
+  --merged-only \
+  --workers 1 \
+  -o ~/Documents/global-services-may-2026.xlsx
+```
+
+#### Monitor a long run
+
+```bash
+tail -f ~/Documents/global-services-may-2026_run.log
+```
+
+---
+
 ### Date ranges
 
 Reports use a **half-open calendar window** in US Eastern time by default:
@@ -312,25 +500,31 @@ One repository per run. Accepted formats:
 
 ### Recommended: one-command monthly report
 
-**All PRs merged in May 2026** on `global-services`:
+**All PRs merged in May 2026** on `global-services` (see [Sample commands](#sample-commands-copy-paste) for full parameter list):
 
 ```bash
+cd ~/Dev/github-analysis
+
 uv run github-analysis run \
   --repo global-services \
   --start-date 2026-05-01 \
   --end-date 2026-06-01 \
-  --merged-only
+  --merged-only \
+  --workers 4 \
+  -o ~/Documents/global-services-may-2026.xlsx
 ```
 
-**Outputs** (default: `~/Documents/`):
+**Outputs** when using `-o ~/Documents/global-services-may-2026.xlsx`:
 
 ```
-~/Documents/global-services_2026-05-01_to_2026-06-01_team_summary.tsv
-~/Documents/global-services_2026-05-01_to_2026-06-01.tsv
-~/Documents/global-services_2026-05-01_to_2026-06-01.xlsx
+~/Documents/global-services-may-2026.xlsx
+~/Documents/global-services-may-2026_person_summary.tsv
+~/Documents/global-services-may-2026.tsv
+~/Documents/global-services-may-2026_raw.json
+~/Documents/global-services-may-2026_run.log
 ```
 
-**Custom output directory:**
+**Auto-named outputs** (omit `-o`, use `--output-dir` only):
 
 ```bash
 uv run github-analysis run \
@@ -338,10 +532,33 @@ uv run github-analysis run \
   --start-date 2026-05-01 \
   --end-date 2026-06-01 \
   --merged-only \
+  --workers 4 \
+  --output-dir ~/Documents
+```
+
+Creates:
+
+```
+~/Documents/global-services_2026-05-01_to_2026-06-01.xlsx
+~/Documents/global-services_2026-05-01_to_2026-06-01_person_summary.tsv
+~/Documents/global-services_2026-05-01_to_2026-06-01.tsv
+~/Documents/global-services_2026-05-01_to_2026-06-01_raw.json
+~/Documents/global-services_2026-05-01_to_2026-06-01_run.log
+```
+
+**Custom output directory** (auto-named files inside that folder):
+
+```bash
+uv run github-analysis run \
+  --repo global-services \
+  --start-date 2026-05-01 \
+  --end-date 2026-06-01 \
+  --merged-only \
+  --workers 4 \
   --output-dir ~/Documents/github-reports
 ```
 
-**Shell wrapper (same result):**
+**Shell wrapper:**
 
 ```bash
 chmod +x run_monthly_report.sh
@@ -358,37 +575,46 @@ Includes PRs **merged or opened** in the window (omit `--merged-only`):
 uv run github-analysis analyze \
   --repo https://github.com/Customer-Engagement-Digital-Technology/global-services.git \
   --start-date 2026-05-01 \
-  --end-date 2026-06-01
+  --end-date 2026-06-01 \
+  --workers 4 \
+  -o ~/Documents/global-services-may-2026-all-activity.tsv
 ```
 
-**Merged PRs only:**
+**Merged PRs only** (typical monthly report):
 
 ```bash
 uv run github-analysis analyze \
   --repo global-services \
   --start-date 2026-05-01 \
   --end-date 2026-06-01 \
-  --merged-only
+  --merged-only \
+  --workers 4 \
+  -o ~/Documents/global-services-may-2026.tsv
 ```
 
-**Custom output paths:**
+**Custom detail and summary paths:**
 
 ```bash
 uv run github-analysis analyze \
   --repo global-services \
   --start-date 2026-05-01 \
   --end-date 2026-06-01 \
-  -o reports/may-detail.tsv \
-  --summary-output reports/may-team-summary.tsv
+  --merged-only \
+  --workers 4 \
+  -o ~/Documents/reports/may-detail.tsv \
+  --summary-output ~/Documents/reports/may-person-summary.tsv
 ```
 
-**Print detail TSV to terminal:**
+**Print detail TSV to terminal** (no summary file):
 
 ```bash
 uv run github-analysis analyze \
   --repo global-services \
   --start-date 2026-05-01 \
   --end-date 2026-06-01 \
+  --merged-only \
+  --workers 4 \
+  --no-summary \
   -o -
 ```
 
@@ -400,18 +626,18 @@ After `analyze`, or when TSV files already exist:
 
 ```bash
 uv run github-analysis export \
-  --summary analysis-results/global-services_2026-05-01_to_2026-06-01_team_summary.tsv \
-  --detail analysis-results/global-services_2026-05-01_to_2026-06-01.tsv \
-  -o analysis-results/global-services_2026-05-01_to_2026-06-01.xlsx
+  --summary ~/Documents/global-services-may-2026_person_summary.tsv \
+  --detail ~/Documents/global-services-may-2026.tsv \
+  -o ~/Documents/global-services-may-2026.xlsx
 ```
 
-**Team summary only (manager view):**
+**Individual Production sheet only** (manager view):
 
 ```bash
 uv run github-analysis export \
-  --summary analysis-results/global-services_2026-05-01_to_2026-06-01_team_summary.tsv \
+  --summary ~/Documents/global-services-may-2026_person_summary.tsv \
   --summary-only \
-  -o analysis-results/may-team-summary.xlsx
+  -o ~/Documents/global-services-may-2026-managers.xlsx
 ```
 
 ---
@@ -426,39 +652,153 @@ uv run github-analysis export \
 | `--end-date` | analyze, run | End date exclusive (`YYYY-MM-DD`) |
 | `--merged-only` | analyze, run | Only PRs **merged** in the window |
 | `--no-summary` | analyze | Skip team summary TSV |
-| `-o`, `--output` | analyze, export | Output file path (`-` = stdout for analyze) |
+| `-o`, `--output` | run | **Excel** path (`.xlsx`); also writes `{name}.tsv` and `{name}_person_summary.tsv` |
+| `-o`, `--output` | analyze | **Detail TSV** path (`-` = stdout) |
+| `-o`, `--output` | export | **Excel** path (`.xlsx`) — required |
 | `--summary-output` | analyze | Custom path for team summary TSV |
 | `--summary` | export | Input team summary TSV (required) |
 | `--detail` | export | Input PR detail TSV (optional second Excel sheet) |
-| `--summary-only` | export, run | Excel workbook with Team Summary sheet only |
-| `--output-dir` | analyze, run | Output directory (default: `~/Documents`) |
+| `--summary-only` | export, run | Excel workbook with Individual Production sheet only |
+| `--output-dir` | analyze, run | Folder for auto-named files when `-o` is not used (default: `~/Documents`) |
+| `--from-cache` | analyze | Rebuild TSV from an existing `{name}_raw.json` without calling GitHub |
+| `--workers` | analyze, run | Parallel Phase 2 fetch threads (default: **4**; use `1` for serial) |
+
+---
+
+## How the report runs (phases)
+
+Each `analyze` or `run` command goes through three phases. Progress is written to **`{name}_run.log`** and stderr.
+
+| Phase | What happens | Typical duration |
+|-------|----------------|------------------|
+| **Preflight** | `gh auth status`, verify read access to the repo | Seconds |
+| **Phase 1 — Discover** | GitHub search finds PR numbers in the date window; builds author catalog | ~30 s for busy months |
+| **Phase 2 — Fetch details** | For each PR: pull detail, commits, files, events, reviews, comments | **Dominates runtime** (~3 s/PR serial, ~6–10 min with 4 workers for ~500 PRs) |
+| **Phase 3 — Summarize** | Count reviewers/approvers in window; roll up per-person metrics | Seconds to ~1 min |
+| **Write outputs** | TSV files, optional raw JSON cache, then Excel on `run` | Seconds |
+
+**Monitor progress:**
+
+```bash
+tail -f ~/Documents/global-services-may-2026_run.log
+```
+
+You should see lines like `[42/492] PR #317 (AlexsOrtiz)` advancing. Final `.xlsx` / `.tsv` files appear only after Phase 2 completes.
+
+**Example scale:** `global-services` May 2026 (`--merged-only`) discovered **492 PRs**. At ~3 seconds per PR in serial mode, Phase 2 alone is roughly **25 minutes**.
+
+---
+
+## Performance and optimization
+
+### Why fetch time adds up
+
+By default Phase 2 uses **`--workers 4`** (parallel). With `--workers 1`, PRs are fetched **one at a time**. Each PR triggers **about six GitHub REST calls** via `gh api`:
+
+| Call | Endpoint | Purpose |
+|------|----------|---------|
+| 1 | `GET /pulls/{n}` | PR metadata, creator, merge time |
+| 2+ | `GET /pulls/{n}/commits` | Branch start, commit counts (paginated) |
+| 2+ | `GET /pulls/{n}/files` | Added / modified / removed file counts |
+| 1 | `GET /issues/{n}/events` | Draft / ready-for-review timeline |
+| 1 | `GET /pulls/{n}/reviews` | First feedback, approval, reviewer counts |
+| 1 | `GET /issues/{n}/comments` | First feedback from comments |
+
+Large PRs with many commits or files add extra paginated requests. Phase 3 may fetch reviews again for PRs in the review catalog that were not in the activity catalog (cached when possible).
+
+Every call spawns a **`gh api` subprocess** (`github/client.py`), so overhead adds up even when the network is fast.
+
+### GitHub rate limits
+
+Authenticated REST access is typically **5,000 requests/hour** per user/token. Search API is much lower (~30 requests/minute). A month with 500 PRs at ~6 calls each is ~3,000 REST calls — usually fine for one run, but aggressive parallelization can trigger **429** responses (the client retries transient errors including 429).
+
+### What you can do now (no code changes)
+
+| Approach | When to use |
+|----------|-------------|
+| **`--merged-only`** | Smaller PR set when you only care about merged work |
+| **`--from-cache`** | Rebuild TSV/Excel after a successful fetch without hitting GitHub again |
+| **Narrow date window** | Weekly or bi-weekly runs instead of full months during development |
+| **Run in background** | `nohup uv run github-analysis run ... &` and monitor `_run.log` |
+| **Split by period** | Run two half-month reports if you hit search pagination limits |
+
+### Parallel fetch (`--workers`)
+
+Phase 2 supports parallel PR detail fetch:
+
+```bash
+uv run github-analysis run \
+  --repo https://github.com/Customer-Engagement-Digital-Technology/global-services.git \
+  --start-date 2026-05-01 \
+  --end-date 2026-06-01 \
+  --merged-only \
+  --workers 4 \
+  -o ~/Documents/global-services-may-2026.xlsx
+```
+
+| Flag | Default | Notes |
+|------|---------|-------|
+| `--workers N` | **4** | Parallel threads for Phase 2. Use `1` for original serial behavior. |
+| | | **3** is slightly more conservative on rate limits; **4** is the default balance. |
+
+Progress lines in `_run.log` may complete out of PR order when `N > 1`; the detail TSV is sorted by PR number.
+
+### Parallel fetch (implementation)
+
+**You do not have to run serially.** Phase 2 is embarrassingly parallel: each PR is independent once you have the catalog from Phase 1.
+
+A practical approach for this codebase:
+
+1. **`--workers N`** on `analyze` and `run` (default **4**, use `1` for serial).
+2. **`ThreadPoolExecutor`** in `runner.py` — each worker calls `build_pull_request_row()` with its own `GhClient`.
+3. Results are merged and sorted by PR number after the pool finishes.
+
+Start with **`N=4`** (default). Use **`N=3`** if you see 429 rate-limit retries in `_run.log`.
+
+**Why not multiple OS processes?** Possible (`ProcessPoolExecutor`), but each process still shells out to `gh`; threads share one Python process and are simpler for logging and the review cache. Multiprocessing helps only if Python CPU work were the bottleneck — here it is not.
+
+**Other optimizations (larger refactors):**
+
+- **GraphQL** — batch multiple PRs in one query (fewer round trips, more complex schema).
+- **Skip optional calls** — e.g. omit `issue_comments` if first-feedback-from-reviews-only is acceptable.
+- **Direct HTTP client** — replace per-call `gh` subprocess with `httpx` + `GH_TOKEN` (faster, loses `gh auth` convenience).
 
 ---
 
 ## Understanding the output
 
-### Team summary (one row per GitHub user)
+### Individual production summary (one row per GitHub user)
+
+File: `{name}_person_summary.tsv` — Excel sheet **Individual Production**.
 
 | Column | Meaning |
 |--------|---------|
 | `user` | GitHub login |
-| `prs_authored` | PRs authored by this person in the report window |
-| `prs_merged` | Of those, how many were merged |
+| `prs_merged` | PRs **created by** this person that **merged** in the window |
+| `prs_reviewed` | Distinct PRs where this person **submitted any review** in the window |
+| `prs_approved` | Distinct PRs where this person submitted an **APPROVED** review in the window |
+| `prs_authored` | PRs they **created** in the window |
 | `prs_open` | Authored PRs still open or closed without merge |
-| `prs_reviewed` | Distinct PRs where this person **submitted a review** in the window |
-| `avg_files_changed` | Average total files in the diff per authored PR |
-| `avg_files_added` | Average new files per authored PR |
+| `avg_files_added_per_pr` | Mean **new files** (`status: added`) per **authored** PR |
+| `avg_files_changed_per_pr` | Mean **modified/renamed** files per **authored** PR (excludes adds and deletions) |
 
-- **Review counts** use review `submitted_at` inside your date window.
-- **Averages** are over **authored** PRs only; reviewers with no authored PRs show blank averages.
+**Added vs changed:** GitHub classifies each file in a PR diff as `added`, `modified`/`renamed`, or `removed`.
+
+- **`avg_files_added_per_pr`** — brand-new files only  
+- **`avg_files_changed_per_pr`** — existing files edited or renamed (not new, not deleted)
+
+Blank averages mean the person **authored no PRs** in the window (they may still appear with review/approval counts).
+
+Review and approval counts use review **`submitted_at`** inside your date window, not PR merge date.
 
 ### PR detail (optional)
 
-Key columns for sizing and tracing work:
+File: `{name}.tsv` — Excel sheet **PR Detail**.
 
 | Column | Meaning |
 |--------|---------|
-| `committer` | PR author (GitHub login) |
+| `pr_creator` | Person who **opened** the PR (GitHub `user` field — not assignee) |
+| `approved_by` | Login of the first **APPROVED** reviewer on the PR |
 | `pr_number` / `pr_url` | PR identity and link |
 | `merged` | Merge timestamp (empty if not merged) |
 | `pr_files_total` | Total files changed |
@@ -466,12 +806,27 @@ Key columns for sizing and tracing work:
 | `pr_files_modified` | Modified/renamed files |
 | `pr_files_removed` | Deleted files |
 
-The detail file also includes lifecycle timestamps (opened, first feedback, approval, merge) and elapsed hours between milestones.
+The detail file also includes lifecycle timestamps (opened, first feedback, approval, merge), hours since branch start, and elapsed hours between milestones. Check the **`notes`** column for truncation or catalog mismatches (e.g. `catalog_author_mismatch`).
 
 ### Opening files
 
 - **Excel:** open the `.xlsx` directly.
 - **TSV in Excel:** File → Open → select `.tsv` → choose **Tab** as delimiter. You may delete the first two note rows and footer rows for a clean table.
+
+---
+
+## Attribution rules
+
+These rules drive manager-facing numbers. They are intentional — do not use assignees or commit authors for “who did the work.”
+
+| Metric | Counted as | Not used |
+|--------|------------|----------|
+| **PR author / creator** | GitHub `user` on the pull request (who opened it) | Assignees, merge committer |
+| **Reviewer** | Anyone who submitted a review (`submitted_at` in window) | Review comments without a formal review |
+| **Approver** | Review with `state: APPROVED` in window | LGTM comments, CODEOWNERS without review |
+| **File averages** | Mean over PRs **authored** by that person | Reviewed-only contributors get blank averages |
+
+The run log lists every person in the summary with merged / reviewed / approved / authored counts for audit.
 
 ---
 
@@ -484,6 +839,11 @@ Edit `github_analysis/config.py`:
 | `REPORT_TZ` | `America/New_York` | Timezone for calendar dates and report timestamps |
 | `DEFAULT_GITHUB_OWNER` | `Customer-Engagement-Digital-Technology` | Org used when `--repo` is a short name |
 | `DEFAULT_OUTPUT_DIR` | `~/Documents` | Default folder for TSV and Excel output |
+| `DEFAULT_FETCH_WORKERS` | `4` | Default `--workers` for Phase 2 parallel fetch |
+| `GH_API_TIMEOUT_SEC` | `90` | Per-request timeout for `gh api` |
+| `GH_API_RETRIES` | `4` | Retries on transient failures (429, 502, timeouts) |
+| `SEARCH_MAX_PAGES` | `20` | Max search pages (~2000 hits per query) |
+| `API_LIST_PAGES_MAX` | `100` | Max pages for commits/files lists per PR |
 
 After changing config, re-run reports — no reinstall needed.
 
@@ -501,7 +861,9 @@ After changing config, re-run reports — no reinstall needed.
 | Empty report | Wrong date range or no activity | Widen dates; confirm PRs were merged/opened/reviewed in window |
 | `skip PR #…` lines | Transient API error | Re-run; check `gh api` access to that repo |
 | Excel shows one wide column | Wrong delimiter | Import as TSV with Tab separator |
-| Very slow run | Many PRs in window | Normal — each PR requires multiple API calls; progress prints to terminal |
+| Very slow run | Many PRs; serial fetch (~6 API calls/PR) | Monitor `_run.log`; use `--from-cache` for rebuilds; see [Performance](#performance-and-optimization) |
+| Log stopped at `[N/492]` | Still running or hung on one PR | Wait 2–3 min; if frozen, check `gh api` manually; re-run with `--from-cache` if `_raw.json` exists |
+| `429` / rate limit | Too many API calls | Wait and retry; use `--workers 3` or `--workers 1` |
 
 **Diagnostic commands:**
 
@@ -531,8 +893,20 @@ The new command automatically appears in `github-analysis --help` and gets its o
 
 1. Share this repository: `https://github.com/michaelwitz-sbd/github-analysis`
 2. Each person runs **Install uv**, **Clone**, **`uv sync --group excel`**, and **GitHub authentication** once
-3. Run monthly reports with `uv run github-analysis run ...` or `./run_monthly_report.sh`
-4. Distribute the `.xlsx` or `.tsv` files from `analysis-results/` — they are not committed to git
+3. Run monthly reports, for example:
+
+```bash
+uv run github-analysis run \
+  --repo global-services \
+  --start-date 2026-05-01 \
+  --end-date 2026-06-01 \
+  --merged-only \
+  --workers 4 \
+  -o ~/Documents/global-services-may-2026.xlsx
+```
+
+Or use `./run_monthly_report.sh global-services 2026-05-01 2026-06-01 --merged-only`
+4. Distribute the `.xlsx` or `.tsv` files from `~/Documents` (or your `--output-dir`) — they are not committed to git
 
 ---
 

@@ -72,6 +72,26 @@ def _first_approval_time(reviews: list[dict[str, Any]]) -> Optional[datetime]:
     return min(approved) if approved else None
 
 
+def _first_approver_login(reviews: list[dict[str, Any]]) -> str:
+    best_login = ""
+    best_time: Optional[datetime] = None
+    for review in reviews:
+        if (review.get("state") or "").upper() != "APPROVED":
+            continue
+        submitted = parse_github_ts(review.get("submitted_at"))
+        if submitted is None:
+            continue
+        if best_time is None or submitted < best_time:
+            best_time = submitted
+            best_login = ((review.get("user") or {}).get("login")) or ""
+    return best_login
+
+
+def _pull_creator_login(detail: dict[str, Any]) -> str:
+    """PR opener/creator from GitHub API (`user` field). Assignees are ignored."""
+    return ((detail.get("user") or {}).get("login")) or ""
+
+
 def build_pull_request_row(
     service: PullRequestService,
     pull_number: int,
@@ -80,7 +100,11 @@ def build_pull_request_row(
     reviews: Optional[list[dict[str, Any]]] = None,
 ) -> tuple[PullRequestRow, list[dict[str, Any]]]:
     detail = service.detail(pull_number)
-    author = report_author if report_author is not None else (((detail.get("user") or {}).get("login")) or "")
+    creator = _pull_creator_login(detail)
+    if report_author and report_author != creator:
+        notes_prefix = f"catalog_author_mismatch:{report_author}"
+    else:
+        notes_prefix = ""
     branch = detail.get("head", {}).get("ref") or ""
     html_url = detail.get("html_url") or ""
     pr_created = parse_github_ts(detail.get("created_at"))
@@ -103,10 +127,11 @@ def build_pull_request_row(
     comments = service.issue_comments(pull_number)
     first_feedback = _first_feedback_time(reviews, comments)
     approved = _first_approval_time(reviews)
+    approved_by = _first_approver_login(reviews)
 
-    notes = ""
+    notes = notes_prefix
     if branch_start is None:
-        notes = "branch_start_unavailable"
+        notes = _append_note(notes, "branch_start_unavailable")
     if commits_truncated:
         notes = _append_note(notes, "pr_commits_list_truncated")
     if files_truncated:
@@ -114,7 +139,7 @@ def build_pull_request_row(
 
     return (
         PullRequestRow(
-            author=author,
+            author=creator,
             branch=branch,
             pr_number=pull_number,
             pr_url=html_url,
@@ -124,6 +149,7 @@ def build_pull_request_row(
             ready_for_review=ready,
             first_feedback=first_feedback,
             approved=approved,
+            approved_by=approved_by,
             merged=merged,
             closed_at=closed_at,
             notes=notes,

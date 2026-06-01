@@ -26,7 +26,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--summary",
         required=True,
         metavar="PATH",
-        help="Team summary TSV from `analyze` (*_team_summary.tsv)",
+        help="Person-level summary TSV from `analyze` (*_person_summary.tsv)",
     )
     parser.add_argument(
         "--detail",
@@ -43,7 +43,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument(
         "--summary-only",
         action="store_true",
-        help="Write only the Team Summary sheet (ignore --detail)",
+        help="Write only the Individual Production sheet (ignore --detail)",
     )
     parser.set_defaults(handler=run)
 

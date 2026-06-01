@@ -40,6 +40,7 @@ class PullRequestRow:
     approved: Optional[datetime]
     merged: Optional[datetime]
     closed_at: Optional[datetime]
+    approved_by: str = ""
     notes: str = ""
     pr_files_total: int = 0
     pr_files_added: int = 0
@@ -52,13 +53,16 @@ class PullRequestRow:
 
 @dataclass
 class UserSummary:
+    """Per-person production metrics (one row per GitHub login)."""
+
     user: str
-    prs_authored: int
     prs_merged: int
-    prs_open: int
     prs_reviewed: int
-    avg_files_changed: str
-    avg_files_added: str
+    prs_approved: int
+    prs_authored: int
+    prs_open: int
+    avg_files_added_per_pr: str
+    avg_files_changed_per_pr: str
 
 
 @dataclass

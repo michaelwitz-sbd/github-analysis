@@ -32,7 +32,7 @@ def write_detail_tsv(result_rows: list[PullRequestRow], fh: TextIO, config: Repo
     )
 
     headers = [
-        "committer",
+        "pr_creator",
         "head_branch",
         "pr_number",
         "notes",
@@ -49,6 +49,7 @@ def write_detail_tsv(result_rows: list[PullRequestRow], fh: TextIO, config: Repo
         "first_feedback_hours_since_branch",
         "approved",
         "approved_hours_since_branch",
+        "approved_by",
         "merged",
         "merged_hours_since_branch",
         "hours_pr_created_to_first_feedback",
@@ -79,6 +80,7 @@ def write_detail_tsv(result_rows: list[PullRequestRow], fh: TextIO, config: Repo
             *_ts_pair(branch_start, row.ready_for_review, config.report_tz),
             *_ts_pair(branch_start, row.first_feedback, config.report_tz),
             *_ts_pair(branch_start, row.approved, config.report_tz),
+            row.approved_by,
             *_ts_pair(branch_start, row.merged, config.report_tz),
             hours_between(pr_created, row.first_feedback),
             hours_between(pr_created, row.approved),
@@ -110,22 +112,26 @@ def write_summary_tsv(summaries: list[UserSummary], fh: TextIO, config: ReportCo
     end_date = config.end_date.isoformat()
 
     fh.write(
-        f"GitHub team summary — {repository.slug} — calendar window {start_date} .. "
+        f"GitHub individual production summary — {repository.slug} — calendar window {start_date} .. "
         f"{end_date} (end date exclusive) — report timezone {tz_key}\n"
     )
     fh.write(
-        "One row per GitHub login. Author metrics use PRs merged or opened in the window. "
-        "Review metrics count distinct PRs where the person submitted a review in the window. "
-        "Average file metrics are over authored PRs only.\n"
+        "One row per person (GitHub login) for individual production evaluation. "
+        "PR counts: prs_merged = PRs they authored that merged; prs_reviewed = distinct PRs they reviewed; "
+        "prs_approved = distinct PRs where they submitted an APPROVED review. "
+        "File columns are means per authored PR (not repo-wide totals): "
+        "avg_files_added_per_pr = new files; avg_files_changed_per_pr = modified/renamed files "
+        "(excludes new files and deletions). Blank when the person authored no PRs in the window.\n"
     )
     headers = [
         "user",
-        "prs_authored",
         "prs_merged",
-        "prs_open",
         "prs_reviewed",
-        "avg_files_changed",
-        "avg_files_added",
+        "prs_approved",
+        "prs_authored",
+        "prs_open",
+        "avg_files_added_per_pr",
+        "avg_files_changed_per_pr",
     ]
     fh.write("\t".join(headers) + "\n")
     for summary in summaries:
@@ -133,12 +139,13 @@ def write_summary_tsv(summaries: list[UserSummary], fh: TextIO, config: ReportCo
             "\t".join(
                 [
                     summary.user,
-                    str(summary.prs_authored),
                     str(summary.prs_merged),
-                    str(summary.prs_open),
                     str(summary.prs_reviewed),
-                    summary.avg_files_changed,
-                    summary.avg_files_added,
+                    str(summary.prs_approved),
+                    str(summary.prs_authored),
+                    str(summary.prs_open),
+                    summary.avg_files_added_per_pr,
+                    summary.avg_files_changed_per_pr,
                 ]
             )
             + "\n"

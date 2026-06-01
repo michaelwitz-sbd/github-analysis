@@ -1,117 +1,253 @@
 from __future__ import annotations
 
-import sys
-from typing import Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
+from typing import Any, Optional
 
 from github_analysis.analysis.pr_builder import build_pull_request_row
-from github_analysis.analysis.reviews import collect_review_counts_by_user
+from github_analysis.analysis.reviews import (
+    collect_approval_counts_by_user,
+    collect_review_counts_by_user,
+)
 from github_analysis.analysis.summaries import compute_user_summaries
+from github_analysis.cache.raw_store import save_raw_cache
 from github_analysis.catalog.search import (
     build_activity_catalog,
     build_review_catalog,
     group_prs_by_user,
 )
+from github_analysis.config import DEFAULT_FETCH_WORKERS
 from github_analysis.github.client import GhClient
 from github_analysis.github.pulls import PullRequestService
-from github_analysis.models import ReportConfig, ReportResult
+from github_analysis.logging.run_log import RunLog
+from github_analysis.models import PullRequestRow, ReportConfig, ReportResult, RepositoryRef
 from github_analysis.time_utils import iso_utc_z, window_bounds_utc
 
 
-def run_report(config: ReportConfig) -> ReportResult:
+def _log_person_coverage(
+    log: RunLog,
+    *,
+    activity_catalog: dict[int, str],
+    rows: list,
+    summaries: list,
+    skipped: list[int],
+) -> None:
+    authors_in_catalog = sorted({login or "(unknown)" for login in activity_catalog.values()}, key=str.lower)
+    authors_in_rows = sorted({row.author for row in rows}, key=str.lower)
+    summary_users = sorted((summary.user for summary in summaries), key=str.lower)
+
+    log.info(f"Individual summary rows: {len(summaries)}")
+    log.info(f"PR authors in catalog: {len(authors_in_catalog)}")
+    log.info(f"PR authors with detail rows: {len(authors_in_rows)}")
+    if skipped:
+        log.warn(f"Skipped PR numbers ({len(skipped)}): {', '.join(str(n) for n in skipped)}")
+
+    missing_rows = sorted(set(authors_in_catalog) - set(authors_in_rows), key=str.lower)
+    if missing_rows:
+        log.warn(
+            "Authors in catalog without detail rows (likely all PRs skipped): "
+            + ", ".join(missing_rows)
+        )
+
+    reviewers_only = sorted(set(summary_users) - set(authors_in_rows), key=str.lower)
+    if reviewers_only:
+        log.info(
+            "Users in summary with reviews but no authored PR rows: "
+            + ", ".join(reviewers_only)
+        )
+
+    log.info("Person-level metrics:")
+    for summary in sorted(summaries, key=lambda item: item.user.lower()):
+        log.info(
+            "  "
+            f"{summary.user}: "
+            f"merged={summary.prs_merged}, "
+            f"reviewed={summary.prs_reviewed}, "
+            f"approved={summary.prs_approved}, "
+            f"authored={summary.prs_authored}, "
+            f"avg_files_added_per_pr={summary.avg_files_added_per_pr or '-'}, "
+            f"avg_files_changed_per_pr={summary.avg_files_changed_per_pr or '-'}"
+        )
+
+
+def _fetch_pr_detail(
+    repository: RepositoryRef,
+    pull_number: int,
+    report_author: str,
+) -> tuple[int, Optional[PullRequestRow], list[dict[str, Any]], Optional[str]]:
+    try:
+        service = PullRequestService(GhClient(), repository)
+        row, reviews = build_pull_request_row(
+            service, pull_number, report_author=report_author
+        )
+        return pull_number, row, reviews, None
+    except Exception as exc:
+        return pull_number, None, [], str(exc)
+
+
+def _fetch_pr_details(
+    *,
+    repository: RepositoryRef,
+    grouped: list[tuple[str, list[int]]],
+    workers: int,
+    emit,
+    emit_error,
+) -> tuple[list[PullRequestRow], dict[int, list[dict[str, Any]]], list[int]]:
+    tasks: list[tuple[int, str]] = []
+    for author, pr_numbers in grouped:
+        for pull_number in pr_numbers:
+            tasks.append((pull_number, author))
+
+    total_prs = len(tasks)
+    rows: list[PullRequestRow] = []
+    reviews_cache: dict[int, list[dict[str, Any]]] = {}
+    skipped: list[int] = []
+
+    if total_prs == 0:
+        return rows, reviews_cache, skipped
+
+    if workers <= 1:
+        emit("Phase 2: fetching pull request details (serial)")
+        for index, (pull_number, author) in enumerate(tasks, start=1):
+            emit(f"[{index}/{total_prs}] PR #{pull_number} ({author})")
+            _, row, reviews, error = _fetch_pr_detail(repository, pull_number, author)
+            if error:
+                skipped.append(pull_number)
+                emit_error(f"Skip PR #{pull_number} ({author}): {error}")
+            elif row is not None:
+                rows.append(row)
+                reviews_cache[pull_number] = reviews
+        rows.sort(key=lambda item: item.pr_number)
+        skipped.sort()
+        return rows, reviews_cache, skipped
+
+    emit(f"Phase 2: fetching pull request details ({workers} workers)")
+    completed = 0
+    lock = Lock()
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        future_to_task = {
+            executor.submit(_fetch_pr_detail, repository, pull_number, author): (
+                pull_number,
+                author,
+            )
+            for pull_number, author in tasks
+        }
+        for future in as_completed(future_to_task):
+            pull_number, author = future_to_task[future]
+            _, row, reviews, error = future.result()
+            with lock:
+                completed += 1
+                if error:
+                    skipped.append(pull_number)
+                    emit_error(f"Skip PR #{pull_number} ({author}): {error}")
+                elif row is not None:
+                    rows.append(row)
+                    reviews_cache[pull_number] = reviews
+                emit(f"[{completed}/{total_prs}] PR #{pull_number} ({author})")
+
+    rows.sort(key=lambda item: item.pr_number)
+    skipped.sort()
+    return rows, reviews_cache, skipped
+
+
+def run_report(
+    config: ReportConfig,
+    *,
+    log: Optional[RunLog] = None,
+    raw_cache_path: Optional[str] = None,
+    workers: int = DEFAULT_FETCH_WORKERS,
+) -> ReportResult:
     """Collect PR detail rows and per-person summaries for one repository."""
+    emit = log.info if log else lambda msg: None
+    emit_warn = log.warn if log else lambda msg: None
+    emit_error = log.error if log else lambda msg: None
+
+    if workers < 1:
+        raise ValueError("--workers must be at least 1")
+
     client = GhClient()
     service = PullRequestService(client, config.repository)
     start_utc, end_exclusive_utc = window_bounds_utc(
         config.start_date, config.end_date, config.report_tz
     )
 
-    print(
-        f"Repository: {config.repository.slug} (single repo per run)",
-        file=sys.stderr,
-    )
-    print(
+    emit(f"Repository: {config.repository.slug}")
+    emit(
         f"Report timezone: {config.report_tz.key} — window "
         f"{config.start_date.isoformat()} .. {config.end_date.isoformat()} "
-        f"(half-open; UTC bounds {iso_utc_z(start_utc)} .. {iso_utc_z(end_exclusive_utc)})",
-        file=sys.stderr,
+        f"(UTC {iso_utc_z(start_utc)} .. {iso_utc_z(end_exclusive_utc)})"
     )
     if config.merged_only:
-        print("Mode: merged PRs only", file=sys.stderr)
+        emit("Mode: merged PRs only")
+    emit(f"Fetch workers: {workers}")
 
-    print("Phase 1: discovering pull requests…", file=sys.stderr)
-    activity_catalog = build_activity_catalog(
-        client,
-        config.repository,
-        start_utc,
-        end_exclusive_utc,
-        merged_only=config.merged_only,
-    )
-    review_catalog = build_review_catalog(
-        client,
-        config.repository,
-        start_utc,
-        end_exclusive_utc,
-        activity_catalog=activity_catalog,
-    )
-    authors = sorted(
-        {login or "(unknown)" for login in activity_catalog.values()},
-        key=str.lower,
-    )
-    print(
-        f"Phase 1: {len(activity_catalog)} author-activity PR(s), "
-        f"{len(review_catalog)} PR(s) for review scan, {len(authors)} author(s)",
-        file=sys.stderr,
-    )
-    if authors:
-        print("Authors:", file=sys.stderr)
-        for author in authors:
-            print(f"  {author}", file=sys.stderr)
-    else:
-        print("Authors: (none)", file=sys.stderr)
+    emit("Phase 1: discovering pull requests")
+    try:
+        activity_catalog = build_activity_catalog(
+            client,
+            config.repository,
+            start_utc,
+            end_exclusive_utc,
+            merged_only=config.merged_only,
+        )
+        review_catalog = build_review_catalog(
+            client,
+            config.repository,
+            start_utc,
+            end_exclusive_utc,
+            activity_catalog=activity_catalog,
+        )
+    except Exception as exc:
+        emit_error(f"GitHub search failed: {exc}")
+        raise
 
-    print("Phase 2: fetching pull request details…", file=sys.stderr)
+    authors = sorted({login or "(unknown)" for login in activity_catalog.values()}, key=str.lower)
+    emit(
+        f"Phase 1 complete: {len(activity_catalog)} activity PR(s), "
+        f"{len(review_catalog)} PR(s) for review scan, {len(authors)} PR author(s)"
+    )
+    for author in authors:
+        emit(f"  catalog author: {author}")
+    if not authors:
+        emit_warn("No PRs matched the date window and filters")
+
     grouped = group_prs_by_user(activity_catalog)
-    total_prs = sum(len(numbers) for _, numbers in grouped)
-    rows = []
-    reviews_cache: dict[int, list[dict[str, Any]]] = {}
-    skipped: list[int] = []
-    index = 0
-
-    for author, pr_numbers in grouped:
-        for pull_number in pr_numbers:
-            index += 1
-            print(
-                f"[{index}/{total_prs}] PR #{pull_number} ({author}) …",
-                file=sys.stderr,
-                flush=True,
-            )
-            try:
-                row, reviews = build_pull_request_row(
-                    service, pull_number, report_author=author
-                )
-                rows.append(row)
-                reviews_cache[pull_number] = reviews
-                print(f"    → branch {row.branch!r} (done)", file=sys.stderr, flush=True)
-            except Exception as exc:
-                skipped.append(pull_number)
-                print(f"    → skip PR #{pull_number}: {exc}", file=sys.stderr, flush=True)
-
-    print("Phase 3: building team summary…", file=sys.stderr)
-    review_counts = collect_review_counts_by_user(
-        service,
-        list(review_catalog.keys()),
-        start_utc,
-        end_exclusive_utc,
-        reviews_cache=reviews_cache,
-    )
-    summaries = compute_user_summaries(rows, review_counts)
-    print(
-        f"Done: {len(rows)} detail row(s); {len(summaries)} person(s) in summary; "
-        f"skipped {len(skipped)} PR(s).",
-        file=sys.stderr,
+    rows, reviews_cache, skipped = _fetch_pr_details(
+        repository=config.repository,
+        grouped=grouped,
+        workers=workers,
+        emit=emit,
+        emit_error=emit_error,
     )
 
-    return ReportResult(
+    emit("Phase 3: building individual person summary")
+    try:
+        review_counts = collect_review_counts_by_user(
+            service,
+            list(review_catalog.keys()),
+            start_utc,
+            end_exclusive_utc,
+            reviews_cache=reviews_cache,
+        )
+        approval_counts = collect_approval_counts_by_user(
+            service,
+            list(review_catalog.keys()),
+            start_utc,
+            end_exclusive_utc,
+            reviews_cache=reviews_cache,
+        )
+    except Exception as exc:
+        emit_error(f"Review aggregation failed: {exc}")
+        raise
+
+    summaries = compute_user_summaries(rows, review_counts, approval_counts)
+    emit(
+        f"Fetch complete: {len(rows)} detail row(s); {len(summaries)} person row(s); "
+        f"skipped {len(skipped)} PR(s)"
+    )
+
+    result = ReportResult(
         config=config,
         rows=rows,
         summaries=summaries,
@@ -119,3 +255,25 @@ def run_report(config: ReportConfig) -> ReportResult:
         start_utc=start_utc,
         end_exclusive_utc=end_exclusive_utc,
     )
+
+    if log:
+        _log_person_coverage(
+            log,
+            activity_catalog=activity_catalog,
+            rows=rows,
+            summaries=summaries,
+            skipped=skipped,
+        )
+
+    if raw_cache_path:
+        save_raw_cache(
+            raw_cache_path,
+            result=result,
+            activity_catalog=activity_catalog,
+            review_catalog=review_catalog,
+            review_counts_by_user=review_counts,
+            approval_counts_by_user=approval_counts,
+        )
+        emit(f"Raw cache saved: {raw_cache_path}")
+
+    return result

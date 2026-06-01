@@ -10,6 +10,7 @@ from github_analysis.time_utils import iso_utc_z
 
 
 def _catalog_from_queries(client: GhClient, queries: list[str]) -> dict[int, str]:
+    """Map pull number -> PR creator login (`user` from search; assignees are not used)."""
     catalog: dict[int, str] = {}
     for query in queries:
         for item in client.search_issues(query, max_pages=SEARCH_MAX_PAGES):

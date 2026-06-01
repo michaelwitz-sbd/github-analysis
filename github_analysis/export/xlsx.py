@@ -60,7 +60,7 @@ def export_workbook(
 
     workbook = Workbook()
     summary_ws = workbook.active
-    summary_ws.title = "Team Summary"
+    summary_ws.title = "Individual Production"
     summary_ws.append(summary_headers)
     for row in summary_rows:
         summary_ws.append(row)
