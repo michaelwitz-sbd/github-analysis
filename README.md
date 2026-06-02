@@ -32,15 +32,17 @@ uv run github-analysis run \
 | `--workers` | Parallel fetch threads (default `4`) |
 | `-o` | Excel path; sibling TSV, cache, and log share the same base name |
 
-**Outputs** (example base name `global-services-may-2026`):
+**Outputs** — default base name `{repo}_{start}_to_{end}` (date range in every filename; omit `-o` to use this pattern):
 
 | File | Purpose |
 |------|---------|
-| `.xlsx` | Excel — **Individual Production** + **PR Detail** sheets |
+| `.xlsx` | Excel — **Individual Production** + **PR Detail** sheets (`run` only) |
 | `_person_summary.tsv` | One row per person |
 | `.tsv` | One row per pull request |
 | `_raw.json` | Cache for `--from-cache` rebuilds |
 | `_run.log` | Auth checks, progress, errors — **read this first if a run fails** |
+
+Example: `global-services_2026-05-15_to_2026-06-01_run.log` for May 15–31 does not overwrite a full-month `..._2026-05-01_to_2026-06-01.*` report.
 
 ---
 
@@ -251,9 +253,13 @@ uv run github-analysis analyze \
 ./run_monthly_report.sh global-services 2026-05-01 2026-06-01 --merged-only
 ```
 
-**Monitor a run:**
+**Monitor a run** (log path matches your `--start-date` and `--end-date`; written as soon as the run starts):
 
 ```bash
+# Default output names (no -o): replace dates for your window
+tail -f ~/Documents/global-services_2026-05-15_to_2026-06-01_run.log
+
+# Custom -o base name (e.g. global-services-may-2026.xlsx → global-services-may-2026_run.log)
 tail -f ~/Documents/global-services-may-2026_run.log
 ```
 

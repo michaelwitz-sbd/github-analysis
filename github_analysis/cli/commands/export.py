@@ -11,14 +11,16 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser(
         "export",
         help="Convert TSV reports to Excel (.xlsx)",
-        description="Export team summary and PR detail TSV files into a single Excel workbook.",
+        description=(
+            "Export person summary and PR detail TSV files from `analyze` into a single Excel workbook."
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
             "  github-analysis export \\\n"
-            "    --summary analysis-results/global-services_2026-05-01_to_2026-06-01_team_summary.tsv \\\n"
-            "    --detail analysis-results/global-services_2026-05-01_to_2026-06-01.tsv \\\n"
-            "    -o analysis-results/global-services_2026-05-01_to_2026-06-01.xlsx\n"
+            "    --summary ~/Documents/global-services_2026-05-01_to_2026-06-01_person_summary.tsv \\\n"
+            "    --detail ~/Documents/global-services_2026-05-01_to_2026-06-01.tsv \\\n"
+            "    -o ~/Documents/global-services_2026-05-01_to_2026-06-01.xlsx\n"
             "  github-analysis export --summary summary.tsv --summary-only -o team.xlsx"
         ),
     )
