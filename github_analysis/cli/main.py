@@ -12,17 +12,21 @@ def build_parser() -> argparse.ArgumentParser:
         prog="github-analysis",
         description=(
             "Analyze GitHub pull-request activity by individual contributor.\n\n"
+            "Requires GitHub CLI (`gh`) authenticated with read access to the target repo.\n\n"
             "Commands:\n"
             "  analyze   Fetch data from GitHub and write TSV reports\n"
             "  export    Convert TSV reports to Excel\n"
             "  run       Analyze + export in one step\n\n"
-            "Run `github-analysis <command> --help` for command-specific options."
+            "Run `github-analysis <command> --help` for command-specific options.\n"
+            "Column definitions and date-window details: README.md in the repo."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Quick start (all of May 2026, merged PRs only):\n"
             "  uv run github-analysis run --repo global-services \\\n"
-            "    --start-date 2026-05-01 --end-date 2026-06-01 --merged-only"
+            "    --start-date 2026-05-01 --end-date 2026-06-01 --merged-only\n\n"
+            "Default output names include the date range, e.g.\n"
+            "  ~/Documents/global-services_2026-05-01_to_2026-06-01.xlsx"
         ),
     )
     parser.add_argument(

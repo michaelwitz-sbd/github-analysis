@@ -5,6 +5,7 @@ import os
 import sys
 
 from github_analysis.cli.commands import analyze, export
+from github_analysis.cli.commands.analyze import MERGED_ONLY_HELP, OUTPUT_FILES_EPILOG
 from github_analysis.config import DEFAULT_FETCH_WORKERS, DEFAULT_OUTPUT_DIR
 from github_analysis.export.paths import (
     default_detail_path,
@@ -22,13 +23,20 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Analyze and export Excel in one step",
         description=(
             "Convenience command: runs `analyze` then `export` with default output paths. "
-            "Best for monthly manager reports."
+            "Best for monthly manager reports.\n\n"
+            "To rebuild Excel from an existing *_raw.json cache, use `analyze --from-cache` "
+            "then `export` instead."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
+            f"{OUTPUT_FILES_EPILOG}"
+            "  {repo}_{start}_to_{end}.xlsx\n\n"
             "Examples:\n"
-            "  # May 2026 merged PRs only (recommended for monthly reports):\n"
+            "  # All of May 2026 (recommended for monthly reports):\n"
             "  github-analysis run --repo global-services --start-date 2026-05-01 --end-date 2026-06-01 --merged-only\n"
+            "  # May 15 through month end — separate files from a full-month run:\n"
+            "  github-analysis run --repo global-services --start-date 2026-05-15 --end-date 2026-06-01 --merged-only\n"
+            "  # Custom Excel base name (sibling TSV, cache, and log share this stem):\n"
             "  github-analysis run --repo global-services --start-date 2026-05-01 --end-date 2026-06-01 --merged-only --workers 4 \\\n"
             "    -o ~/Documents/global-services-may-2026.xlsx"
         ),
@@ -38,7 +46,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument(
         "--merged-only",
         action="store_true",
-        help="Include only PRs merged during the date window",
+        help=MERGED_ONLY_HELP,
     )
     parser.add_argument(
         "--summary-only",
@@ -56,8 +64,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--output",
         metavar="PATH",
         help=(
-            "Primary output file path (.xlsx Excel workbook). "
-            "Also writes sibling TSV files: {name}_person_summary.tsv and {name}.tsv"
+            f"Excel workbook path (.xlsx). Default: {DEFAULT_OUTPUT_DIR}/{{repo}}_{{start}}_to_{{end}}.xlsx. "
+            "Also writes sibling files: {{stem}}.tsv, {{stem}}_person_summary.tsv, "
+            "{{stem}}_raw.json, {{stem}}_run.log"
         ),
     )
     parser.add_argument(

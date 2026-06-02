@@ -22,6 +22,30 @@ from github_analysis.pipeline.runner import run_report
 from github_analysis.repo import resolve_repository
 from github_analysis.time_utils import parse_calendar_date
 
+DATE_WINDOW_NOTE = (
+    f"Half-open window in {REPORT_TZ.key}: --start-date <= event time < --end-date"
+)
+
+MERGED_ONLY_HELP = (
+    "PR detail sheet: merged-in-window PRs only. Person summary still includes "
+    "authored, open-at-window-end, closed-unmerged, and review counts"
+)
+
+FROM_CACHE_HELP = (
+    "Skip GitHub fetch; rebuild TSV from *_raw.json. Metrics use the cache's repo "
+    "and date window; --repo/--start-date/--end-date here affect output paths only. "
+    "--workers is ignored"
+)
+
+OUTPUT_FILES_EPILOG = (
+    "Output files (default names include start and end dates):\n"
+    f"  {{repo}}_{{start}}_to_{{end}}.tsv\n"
+    f"  {{repo}}_{{start}}_to_{{end}}_person_summary.tsv\n"
+    f"  {{repo}}_{{start}}_to_{{end}}_raw.json  (written on fresh fetch only)\n"
+    f"  {{repo}}_{{start}}_to_{{end}}_run.log\n"
+    f"  Default directory: {DEFAULT_OUTPUT_DIR}\n"
+)
+
 
 def register(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser(
@@ -29,7 +53,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         help="Fetch GitHub data and write TSV reports",
         description=(
             "Analyze pull-request activity for one repository and write tab-separated reports. "
-            "Produces a per-person summary and optional per-PR detail file."
+            "Produces a per-person summary and optional per-PR detail file.\n\n"
+            f"{DATE_WINDOW_NOTE}."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_examples(),
@@ -40,7 +65,11 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "-o",
         "--output",
         metavar="PATH",
-        help=f"Detail TSV path. Default: {DEFAULT_OUTPUT_DIR}/{{repo}}_{{start}}_to_{{end}}.tsv. Use - for stdout.",
+        help=(
+            f"Detail TSV path. Default: {DEFAULT_OUTPUT_DIR}/{{repo}}_{{start}}_to_{{end}}.tsv "
+            "(date range in the name; sibling summary, cache, and log files share this stem). "
+            "Use - for stdout."
+        ),
     )
     parser.add_argument(
         "--summary-output",
@@ -55,7 +84,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument(
         "--merged-only",
         action="store_true",
-        help="Include only PRs merged during the date window (exclude opened-but-not-merged)",
+        help=MERGED_ONLY_HELP,
     )
     parser.add_argument(
         "--output-dir",
@@ -66,7 +95,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument(
         "--from-cache",
         metavar="PATH",
-        help="Skip GitHub fetch; rebuild TSV output from an existing *_raw.json cache file",
+        help=FROM_CACHE_HELP,
     )
     parser.add_argument(
         "--workers",
@@ -99,22 +128,32 @@ def _add_date_args(parser: argparse.ArgumentParser) -> None:
         "--start-date",
         required=True,
         metavar="YYYY-MM-DD",
-        help=f"First calendar day included (timezone: {REPORT_TZ.key})",
+        help=f"First calendar day included, 00:00 {REPORT_TZ.key} ({DATE_WINDOW_NOTE})",
     )
     parser.add_argument(
         "--end-date",
         required=True,
         metavar="YYYY-MM-DD",
-        help=f"First calendar day excluded — e.g. 2026-06-01 for all of May ({REPORT_TZ.key})",
+        help=(
+            f"First calendar day excluded, 00:00 {REPORT_TZ.key} "
+            f"({DATE_WINDOW_NOTE}; e.g. 2026-06-01 includes through May 31)"
+        ),
     )
 
 
 def _examples() -> str:
     return (
+        f"{OUTPUT_FILES_EPILOG}\n"
         "Examples:\n"
+        "  # All of May 2026:\n"
         "  github-analysis analyze --repo global-services --start-date 2026-05-01 --end-date 2026-06-01\n"
-        "  github-analysis analyze --repo global-services --start-date 2026-05-01 --end-date 2026-06-01 --merged-only\n"
-        "  github-analysis analyze --from-cache ~/Documents/global-services-may-2026_raw.json"
+        "  # May 15 through month end (separate output files from a full-month run):\n"
+        "  github-analysis analyze --repo global-services --start-date 2026-05-15 --end-date 2026-06-01 --merged-only\n"
+        "  # Rebuild TSV from cache (still pass --repo and dates for output naming):\n"
+        "  github-analysis analyze --from-cache ~/Documents/global-services_2026-05-01_to_2026-06-01_raw.json \\\n"
+        "    --repo global-services --start-date 2026-05-01 --end-date 2026-06-01\n\n"
+        "Large repos: GitHub search returns at most 1,000 matches per query. "
+        "Split the date window if the run log warns about truncation."
     )
 
 
