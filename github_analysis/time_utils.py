@@ -9,6 +9,35 @@ def parse_calendar_date(value: str) -> date:
     return datetime.strptime(value.strip(), "%Y-%m-%d").date()
 
 
+def parse_calendar_month(value: str) -> tuple[int, int]:
+    """Parse YYYY-MM and return (year, month)."""
+    text = value.strip()
+    try:
+        parsed = datetime.strptime(text, "%Y-%m")
+    except ValueError as exc:
+        raise ValueError(f"expected YYYY-MM for --month, got {value!r}") from exc
+    return parsed.year, parsed.month
+
+
+def calendar_month_window(year: int, month: int) -> tuple[date, date]:
+    """Return (start_inclusive, end_exclusive) calendar dates for a full month."""
+    if month < 1 or month > 12:
+        raise ValueError(f"month must be 1-12, got {month}")
+    start = date(year, month, 1)
+    if month == 12:
+        end_exclusive = date(year + 1, 1, 1)
+    else:
+        end_exclusive = date(year, month + 1, 1)
+    return start, end_exclusive
+
+
+def parse_report_timezone(value: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(value.strip())
+    except Exception as exc:
+        raise ValueError(f"unknown timezone {value!r} (use an IANA name, e.g. America/New_York)") from exc
+
+
 def window_bounds_utc(
     start_d: date, end_exclusive_d: date, report_tz: ZoneInfo
 ) -> tuple[datetime, datetime]:

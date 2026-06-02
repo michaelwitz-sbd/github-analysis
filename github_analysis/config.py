@@ -4,7 +4,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 # Calendar dates for reports are interpreted in this timezone (DST-aware).
-REPORT_TZ = ZoneInfo("America/New_York")
+DEFAULT_REPORT_TZ_NAME = "America/New_York"
+REPORT_TZ = ZoneInfo(DEFAULT_REPORT_TZ_NAME)
 
 # Used when --repo is a short name without owner.
 DEFAULT_GITHUB_OWNER = "Customer-Engagement-Digital-Technology"

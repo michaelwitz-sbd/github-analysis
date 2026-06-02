@@ -22,9 +22,8 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Quick start (all of May 2026, merged PRs only):\n"
-            "  uv run github-analysis run --repo global-services \\\n"
-            "    --start-date 2026-05-01 --end-date 2026-06-01 --merged-only\n\n"
+            "Quick start (all of May 2026, merged PRs only, US Eastern):\n"
+            "  uv run github-analysis run --repo global-services --month 2026-05 --merged-only\n\n"
             "Default output names include the date range, e.g.\n"
             "  ~/Documents/global-services_2026-05-01_to_2026-06-01.xlsx"
         ),

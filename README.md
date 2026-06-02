@@ -17,17 +17,17 @@ uv sync --group excel
 
 uv run github-analysis run \
   --repo global-services \
-  --start-date 2026-05-01 \
-  --end-date 2026-06-01 \
+  --month 2026-05 \
   --merged-only \
-  --workers 4 \
-  -o ~/Documents/global-services-may-2026.xlsx
+  --workers 4
 ```
 
 | Flag | Meaning |
 |------|---------|
-| `--start-date` | First calendar day **included** (US Eastern) |
-| `--end-date` | First calendar day **excluded** → all of May 2026 above |
+| `--month` | Full calendar month (`YYYY-MM`) — sets start/end dates automatically |
+| `--timezone` | IANA timezone for calendar dates (default `America/New_York`) |
+| `--start-date` | First calendar day **included** (use instead of `--month` for partial windows) |
+| `--end-date` | First calendar day **excluded** — with `--month 2026-05`, same as `2026-05-01` .. `2026-06-01` |
 | `--merged-only` | PR detail sheet: merged PRs only; person summary still includes authored, open, and review counts |
 | `--workers` | Parallel fetch threads (default `4`) |
 | `-o` | Excel path; sibling TSV, cache, and log share the same base name |
@@ -151,8 +151,10 @@ All commands: `uv run github-analysis <command> --help`
 |--------|----------|-------------|
 | `--repo` | analyze, run | HTTPS URL, `owner/name`, or short name (uses default org in `config.py`) |
 | `--owner` | analyze, run | Org when `--repo` is a short name only |
-| `--start-date` | analyze, run | Start inclusive (`YYYY-MM-DD`) |
-| `--end-date` | analyze, run | End exclusive (`YYYY-MM-DD`) |
+| `--month` | analyze, run | Full calendar month (`YYYY-MM`); cannot combine with `--start-date` / `--end-date` |
+| `--timezone` | analyze, run | IANA timezone for dates and timestamps (default `America/New_York`) |
+| `--start-date` | analyze, run | Start inclusive (`YYYY-MM-DD`); required unless `--month` is set |
+| `--end-date` | analyze, run | End exclusive (`YYYY-MM-DD`); required unless `--month` is set |
 | `--merged-only` | analyze, run | Detail sheet: merged PRs only (see [Monthly metrics](#monthly-metrics)) |
 | `--workers` | analyze, run | Parallel fetch threads (default `4`; use `3` or `1` under rate pressure) |
 | `-o`, `--output` | run | Excel path (`.xlsx`); writes sibling TSV files |
@@ -176,37 +178,47 @@ All commands: `uv run github-analysis <command> --help`
 
 ### Date windows
 
-Reports use a **half-open** calendar window in US Eastern (`America/New_York`):
+Reports use a **half-open** calendar window in the report timezone (`--timezone`, default `America/New_York`):
 
 ```
---start-date <= event time < --end-date
+start <= event time < end   (end date is exclusive)
 ```
+
+**Shorthand for a full calendar month:**
+
+```bash
+--month 2026-05    # same as --start-date 2026-05-01 --end-date 2026-06-01
+```
+
+Use `--start-date` and `--end-date` instead of `--month` for partial windows (e.g. May 15–31).
 
 | Flag | Boundary | Meaning |
 |------|----------|---------|
-| `--start-date` | **Inclusive** (`>=`) | First calendar day **included** — activity from **00:00** on this date |
+| `--month` | Full month | Sets start to the 1st and end to the 1st of the next month |
+| `--start-date` | **Inclusive** (`>=`) | First calendar day **included** — activity from **00:00** in `--timezone` |
 | `--end-date` | **Exclusive** (`<`) | First calendar day **excluded** — window ends the instant **before** 00:00 on this date |
 
-**Important:** `--end-date` uses **strict less-than**, not less-than-or-equal. A PR merged at **June 1 00:00 Eastern** is **not** in a May report that uses `--end-date 2026-06-01`.
+**Important:** The end date uses **strict less-than**, not less-than-or-equal. A PR merged at **June 1 00:00** in the report timezone is **not** in a May report (`--month 2026-05` or `--end-date 2026-06-01`).
 
 **Example — all of May 2026:**
 
 | | Value |
 |--|-------|
-| `--start-date` | `2026-05-01` |
-| `--end-date` | `2026-06-01` |
-| **Includes** | May 1 00:00:00 through May 31 23:59:59 (Eastern) |
+| `--month` | `2026-05` |
+| equivalent dates | `2026-05-01` .. `2026-06-01` |
+| **Includes** | May 1 00:00:00 through May 31 23:59:59 (in `--timezone`) |
 | **Excludes** | June 1 and later |
 
 Every metric (merged, authored, reviews, `prs_open` snapshot at month-end) uses this same window. GitHub search queries use the equivalent inclusive calendar range (`2026-05-01..2026-05-31` for the example above).
 
 **More examples:**
 
-| Period | `--start-date` | `--end-date` | Last day included |
-|--------|----------------|--------------|-------------------|
-| All of May 2026 | `2026-05-01` | `2026-06-01` | May 31 |
-| One week (May 1–7) | `2026-05-01` | `2026-05-08` | May 7 |
-| Q1 2026 | `2026-01-01` | `2026-04-01` | March 31 |
+| Period | `--month` or dates | Last day included |
+|--------|-------------------|-------------------|
+| All of May 2026 | `--month 2026-05` | May 31 |
+| One week (May 1–7) | `2026-05-01` .. `2026-05-08` | May 7 |
+| May 15–31 | `2026-05-15` .. `2026-06-01` | May 31 |
+| Q1 2026 | `2026-01-01` .. `2026-04-01` | March 31 |
 
 ### Common workflows
 
@@ -215,7 +227,7 @@ Every metric (merged, authored, reviews, `prs_open` snapshot at month-end) uses 
 ```bash
 uv run github-analysis run \
   --repo global-services \
-  --start-date 2026-05-01 --end-date 2026-06-01 \
+  --month 2026-05 \
   --merged-only --workers 4 \
   --output-dir ~/Documents
 # → global-services_2026-05-01_to_2026-06-01.xlsx (+ siblings)
@@ -400,7 +412,7 @@ Edit `github_analysis/config.py`:
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `REPORT_TZ` | `America/New_York` | Calendar dates and timestamps |
+| `DEFAULT_REPORT_TZ_NAME` / `--timezone` | `America/New_York` | Calendar dates and timestamps (override per run) |
 | `DEFAULT_GITHUB_OWNER` | `Customer-Engagement-Digital-Technology` | Org for short `--repo` names |
 | `DEFAULT_OUTPUT_DIR` | `~/Documents` | Default output folder |
 | `DEFAULT_FETCH_WORKERS` | `4` | Default `--workers` |

@@ -6,6 +6,12 @@ import sys
 
 from github_analysis.cli.commands import analyze, export
 from github_analysis.cli.commands.analyze import MERGED_ONLY_HELP, OUTPUT_FILES_EPILOG
+from github_analysis.cli.report_window import (
+    add_period_args,
+    apply_resolved_window_to_args,
+    date_window_note,
+    resolve_report_window,
+)
 from github_analysis.config import DEFAULT_FETCH_WORKERS, DEFAULT_OUTPUT_DIR
 from github_analysis.export.paths import (
     default_detail_path,
@@ -24,6 +30,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         description=(
             "Convenience command: runs `analyze` then `export` with default output paths. "
             "Best for monthly manager reports.\n\n"
+            f"{date_window_note()}.\n\n"
             "To rebuild Excel from an existing *_raw.json cache, use `analyze --from-cache` "
             "then `export` instead."
         ),
@@ -32,17 +39,17 @@ def register(subparsers: argparse._SubParsersAction) -> None:
             f"{OUTPUT_FILES_EPILOG}"
             "  {repo}_{start}_to_{end}.xlsx\n\n"
             "Examples:\n"
-            "  # All of May 2026 (recommended for monthly reports):\n"
-            "  github-analysis run --repo global-services --start-date 2026-05-01 --end-date 2026-06-01 --merged-only\n"
+            "  # All of May 2026 (recommended):\n"
+            "  github-analysis run --repo global-services --month 2026-05 --merged-only\n"
             "  # May 15 through month end — separate files from a full-month run:\n"
             "  github-analysis run --repo global-services --start-date 2026-05-15 --end-date 2026-06-01 --merged-only\n"
             "  # Custom Excel base name (sibling TSV, cache, and log share this stem):\n"
-            "  github-analysis run --repo global-services --start-date 2026-05-01 --end-date 2026-06-01 --merged-only --workers 4 \\\n"
+            "  github-analysis run --repo global-services --month 2026-05 --merged-only --workers 4 \\\n"
             "    -o ~/Documents/global-services-may-2026.xlsx"
         ),
     )
     analyze._add_repo_args(parser)
-    analyze._add_date_args(parser)
+    add_period_args(parser)
     parser.add_argument(
         "--merged-only",
         action="store_true",
@@ -89,6 +96,13 @@ def run(args: argparse.Namespace) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
 
+    try:
+        start_date, end_date, report_tz = resolve_report_window(args)
+        apply_resolved_window_to_args(args, start_date, end_date, report_tz)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
     output_dir = os.path.expanduser(args.output_dir)
 
     if args.output:
@@ -109,8 +123,10 @@ def run(args: argparse.Namespace) -> int:
     analyze_args = argparse.Namespace(
         repo=args.repo,
         owner=args.owner,
+        month=None,
         start_date=args.start_date,
         end_date=args.end_date,
+        timezone=args.timezone,
         output=detail_path,
         summary_output=summary_path,
         no_summary=False,

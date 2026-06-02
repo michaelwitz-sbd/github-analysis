@@ -5,12 +5,15 @@ import os
 import sys
 
 from github_analysis.cache.raw_store import load_raw_cache
-from github_analysis.config import DEFAULT_GITHUB_OWNER, DEFAULT_OUTPUT_DIR, DEFAULT_FETCH_WORKERS, REPORT_TZ
+from github_analysis.cli.report_window import (
+    add_period_args,
+    apply_resolved_window_to_args,
+    date_window_note,
+    resolve_report_window,
+)
+from github_analysis.config import DEFAULT_GITHUB_OWNER, DEFAULT_OUTPUT_DIR, DEFAULT_FETCH_WORKERS
 from github_analysis.export.paths import (
     default_detail_path,
-    default_summary_path,
-    raw_cache_path_from_detail,
-    run_log_path_from_detail,
     sibling_paths_from_detail,
     summary_path_from_detail,
 )
@@ -20,11 +23,6 @@ from github_analysis.logging.run_log import RunLog
 from github_analysis.models import ReportConfig
 from github_analysis.pipeline.runner import run_report
 from github_analysis.repo import resolve_repository
-from github_analysis.time_utils import parse_calendar_date
-
-DATE_WINDOW_NOTE = (
-    f"Half-open window in {REPORT_TZ.key}: --start-date <= event time < --end-date"
-)
 
 MERGED_ONLY_HELP = (
     "PR detail sheet: merged-in-window PRs only. Person summary still includes "
@@ -33,8 +31,8 @@ MERGED_ONLY_HELP = (
 
 FROM_CACHE_HELP = (
     "Skip GitHub fetch; rebuild TSV from *_raw.json. Metrics use the cache's repo "
-    "and date window; --repo/--start-date/--end-date here affect output paths only. "
-    "--workers is ignored"
+    "and date window; --repo and --month (or --start-date/--end-date) affect output "
+    "paths only. --workers is ignored"
 )
 
 OUTPUT_FILES_EPILOG = (
@@ -54,13 +52,13 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         description=(
             "Analyze pull-request activity for one repository and write tab-separated reports. "
             "Produces a per-person summary and optional per-PR detail file.\n\n"
-            f"{DATE_WINDOW_NOTE}."
+            f"{date_window_note()}."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_examples(),
     )
     _add_repo_args(parser)
-    _add_date_args(parser)
+    add_period_args(parser)
     parser.add_argument(
         "-o",
         "--output",
@@ -123,35 +121,19 @@ def _add_repo_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_date_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--start-date",
-        required=True,
-        metavar="YYYY-MM-DD",
-        help=f"First calendar day included, 00:00 {REPORT_TZ.key} ({DATE_WINDOW_NOTE})",
-    )
-    parser.add_argument(
-        "--end-date",
-        required=True,
-        metavar="YYYY-MM-DD",
-        help=(
-            f"First calendar day excluded, 00:00 {REPORT_TZ.key} "
-            f"({DATE_WINDOW_NOTE}; e.g. 2026-06-01 includes through May 31)"
-        ),
-    )
-
-
 def _examples() -> str:
     return (
         f"{OUTPUT_FILES_EPILOG}\n"
         "Examples:\n"
-        "  # All of May 2026:\n"
+        "  # All of May 2026 (shorthand):\n"
+        "  github-analysis analyze --repo global-services --month 2026-05 --merged-only\n"
+        "  # Same window with explicit dates:\n"
         "  github-analysis analyze --repo global-services --start-date 2026-05-01 --end-date 2026-06-01\n"
         "  # May 15 through month end (separate output files from a full-month run):\n"
         "  github-analysis analyze --repo global-services --start-date 2026-05-15 --end-date 2026-06-01 --merged-only\n"
-        "  # Rebuild TSV from cache (still pass --repo and dates for output naming):\n"
+        "  # Rebuild TSV from cache (pass --month or dates for output naming):\n"
         "  github-analysis analyze --from-cache ~/Documents/global-services_2026-05-01_to_2026-06-01_raw.json \\\n"
-        "    --repo global-services --start-date 2026-05-01 --end-date 2026-06-01\n\n"
+        "    --repo global-services --month 2026-05\n\n"
         "Large repos: GitHub search returns at most 1,000 matches per query. "
         "Split the date window if the run log warns about truncation."
     )
@@ -175,10 +157,11 @@ def run(args: argparse.Namespace) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
 
-    start_date = parse_calendar_date(args.start_date)
-    end_date = parse_calendar_date(args.end_date)
-    if end_date <= start_date:
-        print("Error: --end-date must be after --start-date (end is exclusive)", file=sys.stderr)
+    try:
+        start_date, end_date, report_tz = resolve_report_window(args)
+        apply_resolved_window_to_args(args, start_date, end_date, report_tz)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         return 2
 
     if getattr(args, "workers", DEFAULT_FETCH_WORKERS) < 1:
@@ -198,7 +181,7 @@ def run(args: argparse.Namespace) -> int:
         repository=repository,
         start_date=start_date,
         end_date=end_date,
-        report_tz=REPORT_TZ,
+        report_tz=report_tz,
         merged_only=args.merged_only,
         include_summary=not args.no_summary,
     )
