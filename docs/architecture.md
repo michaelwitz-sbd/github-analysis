@@ -73,7 +73,7 @@ Ranges align with `--start-date` and the day before `--end-date`. ISO timestamp 
 |---------|---------|---------|
 | `REPORT_TZ` | `America/New_York` | Calendar dates and report timestamps |
 | `DEFAULT_GITHUB_OWNER` | org slug | Short `--repo` names |
-| `DEFAULT_OUTPUT_DIR` | `~/Documents` | Default output folder |
+| `DEFAULT_OUTPUT_DIR` | `~/Dev/github-analysis-results` | Default output folder |
 | `DEFAULT_FETCH_WORKERS` | `4` | Default `--workers` |
 | `GH_API_TIMEOUT_SEC` | `90` | Per-request timeout |
 | `GH_API_RETRIES` | `4` | Retries on 429, 502, timeouts |

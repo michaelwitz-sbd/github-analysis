@@ -10,8 +10,8 @@ REPORT_TZ = ZoneInfo(DEFAULT_REPORT_TZ_NAME)
 # Used when --repo is a short name without owner.
 DEFAULT_GITHUB_OWNER = "Customer-Engagement-Digital-Technology"
 
-# Default output directory for generated reports.
-DEFAULT_OUTPUT_DIR = str(Path.home() / "Documents")
+# Default output directory for generated reports (filenames include the date window).
+DEFAULT_OUTPUT_DIR = str(Path.home() / "Dev" / "github-analysis-results")
 
 # GitHub API client settings
 GH_API_TIMEOUT_SEC = 90

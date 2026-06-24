@@ -6,9 +6,114 @@ Uses the [GitHub CLI](https://cli.github.com/) (`gh`) for API access. See [Insta
 
 ---
 
-## Quick start
+## Monthly combined workbook (CEDT)
 
-**Prerequisites:** [uv](https://docs.astral.sh/uv/), [GitHub CLI 2.30+](https://cli.github.com/), and a GitHub login with read access to the target repo. Full steps are in [Install and setup](#install-and-setup).
+**Primary deliverable each month:** `~/Dev/github-analysis-results/combined-YYYY-MM.xlsx`
+
+That workbook has four sheets:
+
+| Sheet | Contents |
+|-------|----------|
+| **Totals** | One row per GitHub user — PR counts **summed across all three repos** (no repo column) |
+| **global-services** | Person metrics for that repo |
+| **global-user-services** | Person metrics for that repo |
+| **polaris-turbo** | Person metrics for that repo |
+
+The monthly script **fetches raw data from GitHub** for all three CEDT repos, writes per-repo Excel/TSV/cache files, then **builds the combined workbook** automatically. Expect **10–20 minutes** depending on API volume.
+
+### One-time setup
+
+Complete [Install and setup](#install-and-setup) once: `uv`, `gh`, PAT or `gh auth login`, clone this repo, `uv sync --group excel`.
+
+Verify before your first monthly run:
+
+```bash
+gh auth status
+gh repo view Customer-Engagement-Digital-Technology/global-services
+```
+
+### Each month — run in Terminal
+
+Replace `YYYY-MM` with the calendar month you are reporting (e.g. `2026-07` for all of July 2026):
+
+```bash
+cd ~/Dev/michaelwitz-sbd/github-analysis
+./scripts/run_monthly.sh YYYY-MM
+```
+
+**Example — July 2026:**
+
+```bash
+./scripts/run_monthly.sh 2026-07
+```
+
+When it finishes, open:
+
+```text
+~/Dev/github-analysis-results/combined-2026-07.xlsx
+```
+
+**Dry-run** (prints the date window and output paths without fetching):
+
+```bash
+./scripts/run_monthly.sh 2026-07 --dry-run
+```
+
+### What the monthly script creates
+
+All files land in **`~/Dev/github-analysis-results/`** (flat folder; the date window is in each filename):
+
+| File | Purpose |
+|------|---------|
+| `combined-YYYY-MM.xlsx` | **Final deliverable** — Totals + three repo tabs |
+| `{repo}-YYYY-MM-01_to_YYYY-MM-NN.xlsx` | Per-repo Excel (Individual Production + PR Detail) |
+| `{repo}-…_person_summary.tsv` | Person rollup for that repo (input to Totals) |
+| `{repo}-….tsv` | PR-level detail |
+| `{repo}-…_raw.json` | Cache — re-export without re-fetching GitHub |
+| `{repo}-…_run.log` | Progress and errors — **read this first if a run fails** |
+
+Repos analyzed (production defaults):
+
+| Repo | Parallel workers |
+|------|------------------|
+| `global-services` | 4 |
+| `global-user-services` | 3 |
+| `polaris-turbo` | 4 |
+
+Flags applied automatically: **`--merged-only`**, US Eastern (`America/New_York`), half-open date window.
+
+### Partial month (not a full calendar month)
+
+```bash
+cd ~/Dev/michaelwitz-sbd/github-analysis
+./scripts/run_cedt_trio.sh START END
+```
+
+`END` is **exclusive** — for June 1–23 inclusive use `2026-06-01` and `2026-06-24`.
+
+Produces `combined-START_to_END.xlsx` in `~/Dev/github-analysis-results/`.
+
+### Rebuild combined Excel only (no GitHub fetch)
+
+If per-repo `*_person_summary.tsv` files already exist:
+
+```bash
+cd ~/Dev/michaelwitz-sbd/github-analysis
+uv run python scripts/combine_person_summaries.py \
+  --input-dir ~/Dev/github-analysis-results \
+  --stem-suffix "2026-07-01_to_2026-08-01" \
+  -o ~/Dev/github-analysis-results/combined-2026-07.xlsx
+```
+
+Use `--stem-suffix` when the results folder contains more than one date window.
+
+Human runbook: [docs/monthly-runbook.md](docs/monthly-runbook.md) and **`~/Dev/github-analysis-results/README.md`** (local output folder).
+
+---
+
+## Single-repo quick start
+
+**Prerequisites:** [uv](https://docs.astral.sh/uv/), [GitHub CLI 2.30+](https://cli.github.com/) authenticated with a **personal access token (PAT)** or `gh auth login`, and read access to the target repo. See [Install and setup](#install-and-setup) for PAT scope, SSO, and verification.
 
 ```bash
 git clone https://github.com/michaelwitz-sbd/github-analysis.git
@@ -55,9 +160,12 @@ Everything needed before your first report: install tools, clone the project, au
 | Tool | Version | Purpose |
 |------|---------|---------|
 | [uv](https://docs.astral.sh/uv/) | latest | Python runtime and project dependencies |
-| [GitHub CLI](https://cli.github.com/) (`gh`) | 2.30+ | All GitHub API calls (`gh api`) |
+| [GitHub CLI](https://cli.github.com/) (`gh`) | 2.30+ | All GitHub API calls (`gh api`) — **must be installed and authenticated** |
+| **GitHub PAT or `gh auth login`** | — | Token with **`repo`** scope (classic) or fine-grained read on pull requests + contents |
 | GitHub account | — | Read access to the repository you will analyze |
 | Network | — | Reach `github.com` (no proxy config in this tool) |
+
+Default report output directory: **`~/Dev/github-analysis-results/`** (override with `--output-dir` or `GITHUB_ANALYSIS_RESULTS`).
 
 ### 1. Install `uv`
 
@@ -160,7 +268,7 @@ All commands: `uv run github-analysis <command> --help`
 | `-o`, `--output` | run | Excel path (`.xlsx`); writes sibling TSV files |
 | `-o`, `--output` | analyze | Detail TSV path (`-` = stdout) |
 | `-o`, `--output` | export | Excel path (required) |
-| `--output-dir` | analyze, run | Output folder when `-o` omitted (default `~/Documents`) |
+| `--output-dir` | analyze, run | Output folder when `-o` omitted (default `~/Dev/github-analysis-results`) |
 | `--from-cache` | analyze | Rebuild TSV from `{name}_raw.json` without GitHub fetch |
 | `--summary-output` | analyze | Custom path for person summary TSV |
 | `--no-summary` | analyze | Skip person summary TSV |
@@ -228,10 +336,11 @@ Every metric (merged, authored, reviews, `prs_open` snapshot at month-end) uses 
 uv run github-analysis run \
   --repo global-services \
   --month 2026-05 \
-  --merged-only --workers 4 \
-  --output-dir ~/Documents
-# → global-services_2026-05-01_to_2026-06-01.xlsx (+ siblings)
+  --merged-only --workers 4
+# → ~/Dev/github-analysis-results/global-services_2026-05-01_to_2026-06-01.xlsx (+ siblings)
 ```
+
+**Three repos + combined workbook** — use the [monthly script](#each-month--run-in-terminal) or `scripts/run_cedt_trio.sh`.
 
 **Analyze then export separately:**
 
@@ -240,39 +349,29 @@ uv run github-analysis analyze \
   --repo global-services \
   --start-date 2026-05-01 --end-date 2026-06-01 \
   --merged-only --workers 4 \
-  -o ~/Documents/global-services-may-2026.tsv
+  -o ~/Dev/github-analysis-results/global-services-may-2026.tsv
 
 uv run github-analysis export \
-  --summary ~/Documents/global-services-may-2026_person_summary.tsv \
-  --detail ~/Documents/global-services-may-2026.tsv \
-  -o ~/Documents/global-services-may-2026.xlsx
+  --summary ~/Dev/github-analysis-results/global-services-may-2026_person_summary.tsv \
+  --detail ~/Dev/github-analysis-results/global-services-may-2026.tsv \
+  -o ~/Dev/github-analysis-results/global-services-may-2026.xlsx
 ```
 
 **Rebuild from cache** (no GitHub fetch; person summary recomputed from cached timestamps):
 
 ```bash
 uv run github-analysis analyze \
-  --from-cache ~/Documents/global-services-may-2026_raw.json \
+  --from-cache ~/Dev/github-analysis-results/global-services-may-2026_raw.json \
   --repo global-services \
   --start-date 2026-05-01 --end-date 2026-06-01 \
   --merged-only \
-  -o ~/Documents/global-services-may-2026.tsv
-```
-
-**Shell wrapper:**
-
-```bash
-./run_monthly_report.sh global-services 2026-05-01 2026-06-01 --merged-only
+  -o ~/Dev/github-analysis-results/global-services-may-2026.tsv
 ```
 
 **Monitor a run** (log path matches your `--start-date` and `--end-date`; written as soon as the run starts):
 
 ```bash
-# Default output names (no -o): replace dates for your window
-tail -f ~/Documents/global-services_2026-05-15_to_2026-06-01_run.log
-
-# Custom -o base name (e.g. global-services-may-2026.xlsx → global-services-may-2026_run.log)
-tail -f ~/Documents/global-services-may-2026_run.log
+tail -f ~/Dev/github-analysis-results/global-services_2026-05-15_to_2026-06-01_run.log
 ```
 
 ---
@@ -414,7 +513,7 @@ Edit `github_analysis/config.py`:
 |---------|---------|---------|
 | `DEFAULT_REPORT_TZ_NAME` / `--timezone` | `America/New_York` | Calendar dates and timestamps (override per run) |
 | `DEFAULT_GITHUB_OWNER` | `Customer-Engagement-Digital-Technology` | Org for short `--repo` names |
-| `DEFAULT_OUTPUT_DIR` | `~/Documents` | Default output folder |
+| `DEFAULT_OUTPUT_DIR` | `~/Dev/github-analysis-results` | Default output folder |
 | `DEFAULT_FETCH_WORKERS` | `4` | Default `--workers` |
 
 ---
