@@ -5,13 +5,14 @@ import os
 import sys
 
 from github_analysis.cache.raw_store import load_raw_cache
+from github_analysis.cli.output_dir import add_output_dir_argument, apply_output_dir
 from github_analysis.cli.report_window import (
     add_period_args,
     apply_resolved_window_to_args,
     date_window_note,
     resolve_report_window,
 )
-from github_analysis.config import DEFAULT_GITHUB_OWNER, DEFAULT_OUTPUT_DIR, DEFAULT_FETCH_WORKERS
+from github_analysis.config import DEFAULT_GITHUB_OWNER, DEFAULT_FETCH_WORKERS, OUTPUT_DIR_ENV_VAR, default_output_dir
 from github_analysis.export.paths import (
     default_detail_path,
     sibling_paths_from_detail,
@@ -41,7 +42,8 @@ OUTPUT_FILES_EPILOG = (
     f"  {{repo}}_{{start}}_to_{{end}}_person_summary.tsv\n"
     f"  {{repo}}_{{start}}_to_{{end}}_raw.json  (written on fresh fetch only)\n"
     f"  {{repo}}_{{start}}_to_{{end}}_run.log\n"
-    f"  Default directory: {DEFAULT_OUTPUT_DIR}\n"
+            f"  Default directory: {default_output_dir()} "
+            f"(see --output-dir and {OUTPUT_DIR_ENV_VAR})\n"
 )
 
 
@@ -64,7 +66,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "--output",
         metavar="PATH",
         help=(
-            f"Detail TSV path. Default: {DEFAULT_OUTPUT_DIR}/{{repo}}_{{start}}_to_{{end}}.tsv "
+            f"Detail TSV path. Default: {{output-dir}}/{{repo}}_{{start}}_to_{{end}}.tsv "
             "(date range in the name; sibling summary, cache, and log files share this stem). "
             "Use - for stdout."
         ),
@@ -84,12 +86,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help=MERGED_ONLY_HELP,
     )
-    parser.add_argument(
-        "--output-dir",
-        default=DEFAULT_OUTPUT_DIR,
-        metavar="DIR",
-        help=f"Directory for report files (default: {DEFAULT_OUTPUT_DIR})",
-    )
+    add_output_dir_argument(parser)
     parser.add_argument(
         "--from-cache",
         metavar="PATH",
@@ -151,6 +148,7 @@ def _resolve_detail_path(args: argparse.Namespace, repository_name: str) -> str 
 
 
 def run(args: argparse.Namespace) -> int:
+    apply_output_dir(args)
     try:
         repository = resolve_repository(args.repo, args.owner)
     except ValueError as exc:

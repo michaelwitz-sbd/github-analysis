@@ -209,19 +209,39 @@ def combine_workbook(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    from github_analysis.config import OUTPUT_DIR_HELP, default_output_dir, resolve_output_dir
+
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Output directory precedence: --output-dir → GITHUB_ANALYSIS_RESULTS → "
+            f"built-in default ({default_output_dir()}).\n"
+            "CLI --output-dir overrides the environment variable when both are set."
+        ),
+    )
     parser.add_argument(
         "--input-dir",
         type=Path,
-        required=True,
-        help="Directory containing *_person_summary.tsv files",
+        help="Directory containing *_person_summary.tsv files (default: --output-dir)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help=OUTPUT_DIR_HELP,
     )
     parser.add_argument(
         "-o",
         "--output",
         type=Path,
-        required=True,
-        help="Combined Excel output path (.xlsx)",
+        default=None,
+        help="Combined Excel output path (.xlsx). Required unless --output-dir and --combined-name are set",
+    )
+    parser.add_argument(
+        "--combined-name",
+        default="",
+        help="Filename under --output-dir when -o is omitted (e.g. combined-2026-07.xlsx)",
     )
     parser.add_argument(
         "--repo-order",
@@ -239,7 +259,17 @@ def main() -> int:
         ),
     )
     args = parser.parse_args()
-    input_dir = args.input_dir.expanduser()
+
+    out_dir = Path(resolve_output_dir(str(args.output_dir) if args.output_dir else None)).expanduser()
+    input_dir = (args.input_dir or out_dir).expanduser()
+
+    if args.output:
+        output_path = args.output.expanduser()
+    elif args.combined_name:
+        output_path = out_dir / args.combined_name
+    else:
+        raise SystemExit("error: specify -o/--output or --output-dir with --combined-name")
+
     paths = sorted(input_dir.glob("*_person_summary.tsv"))
     if args.stem_suffix:
         paths = [p for p in paths if args.stem_suffix in p.name]
@@ -247,8 +277,8 @@ def main() -> int:
             raise SystemExit(
                 f"no *_person_summary.tsv matching stem-suffix {args.stem_suffix!r} in {input_dir}"
             )
-    combine_workbook(paths, args.output.expanduser(), repo_order=args.repo_order)
-    print(f"Wrote {args.output}")
+    combine_workbook(paths, output_path, repo_order=args.repo_order)
+    print(f"Wrote {output_path}")
     return 0
 
 

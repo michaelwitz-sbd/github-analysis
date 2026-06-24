@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from github_analysis.config import DEFAULT_OUTPUT_DIR
+from github_analysis.config import default_output_dir
 
 
 def safe_repo_filename(repo_name: str, start_date: str, end_date: str) -> str:
@@ -11,7 +11,7 @@ def safe_repo_filename(repo_name: str, start_date: str, end_date: str) -> str:
 
 
 def _output_dir(output_dir: str | None = None) -> str:
-    return os.path.expanduser(output_dir or DEFAULT_OUTPUT_DIR)
+    return os.path.expanduser(output_dir or default_output_dir())
 
 
 def default_detail_path(

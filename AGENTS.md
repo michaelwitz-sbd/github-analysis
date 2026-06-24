@@ -1,194 +1,120 @@
-# Instructions for AI assistants (`github-analysis`)
+# Instructions for AI assistants
 
-This file is for **agents working on this codebase** and for **agents helping a human run reports** on their machine. Read it before changing code or executing analysis.
+For **humans running reports**: all setup, monthly commands, CLI options, output columns, and combined-workbook format are in **[README.md](README.md)**. Do not duplicate that material here — link to the relevant README section instead.
+
+This file covers **what agents should do** when a user asks for help (including users with little or no programming experience).
 
 ---
 
-## Repository layout
+## Source of truth (README sections)
+
+| Topic | README section |
+|-------|----------------|
+| One-time setup (`uv`, `gh`, PAT, SSO) | [Install and setup](README.md#install-and-setup) |
+| Monthly combined Excel (primary workflow) | [Monthly combined workbook (CEDT)](README.md#monthly-combined-workbook-cedt) |
+| Output directory (`--output-dir`, `GITHUB_ANALYSIS_RESULTS`) | [Output directory configuration](README.md#output-directory-configuration) |
+| macOS / Linux / Windows, no `~/Dev` required | [macOS guide](#macos-macbook--setup-and-monthly-report), [Windows guide](#windows--setup-and-monthly-report), [Platforms and paths](README.md#platforms-and-paths) |
+| Single-repo CLI | [Single-repo quick start](README.md#single-repo-quick-start), [Commands](README.md#commands) |
+| Column / metric definitions | [Monthly metrics](README.md#monthly-metrics) and related tables in README |
+| Architecture (for code changes) | [docs/architecture.md](docs/architecture.md) |
+
+**Local output folder** (generated artifacts, not in git): default `~/github-analysis-results/` — or whatever the user set in `GITHUB_ANALYSIS_RESULTS`. See [Output directory configuration](README.md#output-directory-configuration). Do not assume `~/Dev` or a fixed clone path.
+
+---
+
+## Codebase layout (agents editing code)
 
 ```
 github-analysis/
-├── pyproject.toml                 # package github-analysis v2.x, uv project
-├── README.md                      # human runbook + column definitions (update when CLI/columns change)
+├── README.md                      # human runbook — update when CLI/columns change
 ├── AGENTS.md                      # this file
-├── github_pr_timeline_report.py   # legacy wrapper → `analyze`
-├── export_report_xlsx.py          # legacy wrapper → `export`
 ├── scripts/
-│   ├── run_cedt_trio.sh           # three standard CEDT repos + combined Excel
-│   └── combine_person_summaries.py # build multi-repo workbook from *_person_summary.tsv
-├── docs/
-│   ├── architecture.md            # module map, pipeline phases
-│   └── extending-the-cli.md
-└── github_analysis/
-    ├── config.py                  # timezone, default org, DEFAULT_OUTPUT_DIR
-    ├── cli/commands/              # analyze | export | run
-    ├── pipeline/runner.py         # orchestration
-    ├── catalog/search.py          # Phase 1 PR discovery
-    ├── analysis/                  # metrics, person summaries
-    ├── github/                    # GhClient, preflight (gh auth + repo access)
-    ├── cache/raw_store.py         # _raw.json
-    └── export/                    # TSV + Excel paths
-```
-
-**Related (sibling, not in this repo):**
-
-| Path | Purpose |
-|------|---------|
-| `~/Dev/github-analysis-results/` | Default output for production runs (flat; date in filenames) |
-| `~/Dev/github-analysis-results/run_monthly.sh` | One-command full calendar month |
-| `~/Dev/github-analysis-results/AGENTS.md` | Agent runbook for results folder |
-
----
-
-## Prerequisites (verify before running)
-
-The human (or you on their behalf) needs:
-
-| Requirement | Check |
-|-------------|--------|
-| [uv](https://docs.astral.sh/uv/) | `uv --version` |
-| [GitHub CLI](https://cli.github.com/) 2.30+ | `gh --version` |
-| **GitHub auth** — interactive login **or** PAT via `gh auth login --with-token` | `gh auth status` |
-| Token with **`repo`** scope (classic PAT) or fine-grained read on target repos | `gh repo view Customer-Engagement-Digital-Technology/global-services` |
-| Org SSO authorized (CEDT) if enforced | token works on a private org repo |
-
-**PAT setup (when human asks):** See README [Install and setup → Authenticate with GitHub](README.md#4-authenticate-with-github). For automation, `GH_TOKEN` or `GITHUB_TOKEN` in the environment is picked up by `gh`.
-
-**Project install:**
-
-```bash
-cd ~/Dev/michaelwitz-sbd/github-analysis   # or cloned path
-uv sync --group excel
-uv run github-analysis --version
+│   ├── run_monthly.sh             # full calendar month → combined-YYYY-MM.xlsx
+│   ├── run_cedt_trio.sh           # partial window, three CEDT repos
+│   └── combine_person_summaries.py
+├── docs/architecture.md
+└── github_analysis/               # Python package (cli, pipeline, export)
 ```
 
 ---
 
-## CLI commands
+## Default behavior (do not override unless user asks)
 
-Single entry point: `uv run github-analysis` (or `github-analysis` after `uv sync`).
+Production monthly runs use **`./scripts/run_monthly.sh YYYY-MM`**, which applies the CEDT trio, **`--merged-only`**, US Eastern dates, and workers documented in README. See [Monthly combined workbook (CEDT)](README.md#monthly-combined-workbook-cedt).
 
-| Command | Purpose |
+---
+
+## When the user asks for a report
+
+**You run it.** Do not hand them a long shell script unless they must complete GitHub login in a browser (OAuth) or create a PAT.
+
+### Canonical commands (from repo root)
+
+Discover the **clone path** (`git rev-parse --show-toplevel`) and **output directory** (`echo $GITHUB_ANALYSIS_RESULTS` or default `~/github-analysis-results`). Then:
+
+| Request | You run |
 |---------|---------|
-| `run` | Full pipeline: fetch → TSV + Excel + cache + log |
-| `analyze` | Fetch/analyze only (no Excel unless combined elsewhere) |
-| `export` | Re-export from `--from-cache` without re-fetching |
+| Full calendar month | `./scripts/run_monthly.sh YYYY-MM` |
+| Dry-run | `./scripts/run_monthly.sh YYYY-MM --dry-run` |
+| Partial window | `./scripts/run_cedt_trio.sh START END` — dates per README |
+| Combined Excel only (data already fetched) | `uv run python scripts/combine_person_summaries.py …` — see README [Rebuild combined Excel only](README.md#rebuild-combined-excel-only-no-github-fetch) |
 
-### Common flags
-
-| Flag | Meaning |
-|------|---------|
-| `--repo NAME` | Short name (`global-services`) or `owner/repo` |
-| `--month YYYY-MM` | Full calendar month (Eastern by default) |
-| `--start-date` / `--end-date` | Half-open window; **end date is exclusive** |
-| `--merged-only` | PR detail sheet: merged only; person summary still has all counts |
-| `--workers N` | Parallel PR fetch threads (default 4) |
-| `--output-dir DIR` | Directory for sibling artifacts (default `~/Dev/github-analysis-results`) |
-| `-o PATH.xlsx` | Excel path; TSV/cache/log share the same stem |
-
-### Standard CEDT trio (production)
-
-| Repo | Workers |
-|------|---------|
-| `global-services` | 4 |
-| `global-user-services` | 3 |
-| `polaris-turbo` | 4 |
-
-Always use **`--merged-only`** unless the human explicitly asks otherwise.
-
-### Date windows (America/New_York, half-open)
-
-| Human says | `--start-date` | `--end-date` |
-|------------|----------------|--------------|
-| Full July 2026 | `2026-07-01` | `2026-08-01` |
-| June 1–23 inclusive | `2026-06-01` | `2026-06-24` |
-
----
-
-## When the human asks you to run analysis
-
-**Run it yourself.** Do not paste long command sequences and ask them to execute unless auth is broken and only they can complete OAuth.
-
-### Full calendar month (preferred)
-
-```bash
-bash ~/Dev/github-analysis-results/run_monthly.sh YYYY-MM
-```
-
-Deliverable: `~/Dev/github-analysis-results/combined-YYYY-MM.xlsx`
-
-### Custom / partial window
-
-```bash
-cd ~/Dev/michaelwitz-sbd/github-analysis
-./scripts/run_cedt_trio.sh START END
-# optional: ./scripts/run_cedt_trio.sh START END ~/Dev/github-analysis-results combined-my-label.xlsx
-```
-
-### Re-combine only (existing `*_person_summary.tsv`)
-
-When raw data already exists and you only need a fixed combined workbook:
-
-```bash
-cd ~/Dev/michaelwitz-sbd/github-analysis
-uv run python scripts/combine_person_summaries.py \
-  --input-dir ~/Dev/github-analysis-results \
-  --stem-suffix "2026-06-01_to_2026-06-23" \
-  -o ~/Dev/github-analysis-results/combined-2026-06-01_to_2026-06-23.xlsx
-```
-
-Use `--stem-suffix` whenever the input directory holds more than one date window.
+**Deliverable path:** `{output-dir}/combined-YYYY-MM.xlsx` — report the **resolved full path**, not a hardcoded `~/Dev/...` location.
 
 ### Agent checklist
 
-1. `gh auth status` — if this fails, guide human through README auth section; you cannot complete browser OAuth.
-2. Run the appropriate script for the requested window.
-3. On failure, read `{repo}_*_run.log` in the output directory first.
-4. Report the path to **`combined-*.xlsx`** when done.
-5. Do not commit generated `.tsv` / `.xlsx` / `.json` / `.log` files.
-
-### Communicating with the human
-
-- Confirm the **calendar window** in plain language (“June 1–23, Eastern, merged-only production run”).
-- Say **where files landed** (full paths to combined Excel and per-repo logs).
-- If a run takes several minutes, say so once — do not ask them to run parallel fetches.
-- If shell output is empty in Cursor, set **`working_directory`** to the tool repo or results folder and retry before claiming failure.
+1. **`gh auth status`** — if it fails, walk the user through [Authenticate with GitHub](README.md#4-authenticate-with-github); you cannot complete browser OAuth for them.
+2. Confirm **which month or date range** in plain language before running.
+3. Run the command from the **tool repo root** with `working_directory` set if Cursor shell output is empty.
+4. On failure, read **`{repo}-*_run.log`** in the user's output directory — do not guess.
+5. Tell the user the **full path** to the combined `.xlsx` when done.
+6. **Do not commit** generated `.tsv` / `.xlsx` / `.json` / `.log` files.
 
 ---
 
-## Combined Excel workbook
+## Helping non-technical users
 
-Built by `scripts/combine_person_summaries.py`:
+Use README for factual details; your job is to **execute and explain in plain language**.
 
-| Sheet | Contents |
-|-------|----------|
-| **Totals** | One row per **user**; all count columns **summed across repos**. Same columns as person summary — **no repo column** (org-wide user metrics). |
-| `{repo}` | Person summary for that repo only. **Tab name is the repo** — no repo column on the sheet. |
+### What you do vs what they do
 
-Weighted averages on Totals: file averages by `prs_authored`; merge-cycle avg by `prs_merged`; min/max hours across repos.
+| Step | Who |
+|------|-----|
+| Install `uv` / `gh`, clone repo, `uv sync` | You guide using [Install and setup](README.md#install-and-setup); they may need to approve installs |
+| `gh auth login` / PAT / org SSO | **They** must authenticate in browser or paste a token |
+| `./scripts/run_monthly.sh YYYY-MM` | **You** run this |
+| Open the Excel file | Give the **full path** under their output dir; macOS Finder **Go to Folder**, Windows Explorer `%USERPROFILE%\…`, or Linux file manager — see [Platforms and paths](README.md#platforms-and-paths) |
+
+### User intent → your response
+
+| User says | You do |
+|-----------|--------|
+| “Run the July report” / “Last month’s metrics” | Resolve `YYYY-MM`, run `./scripts/run_monthly.sh YYYY-MM`, report output path |
+| “Where is the file?” | Give Finder path above; deliverable name `combined-YYYY-MM.xlsx` |
+| “It failed” / “Nothing happened” | Read latest `*_run.log`; explain in non-jargon (see below) |
+| “Do I need to run anything?” | No — if setup is done, you run the script; they only log in to GitHub if auth is missing |
+| “What’s in the Totals sheet?” | Point to [Monthly combined workbook (CEDT)](README.md#monthly-combined-workbook-cedt) |
+
+### Relaying errors (plain language)
+
+| Log / symptom | Tell the user |
+|---------------|----------------|
+| `gh auth status` / not logged in | “GitHub isn’t signed in on this machine — run `gh auth login` once (I can walk you through it).” |
+| 404 / not found on repo | “Your token can’t see the repo — check PAT `repo` scope and org SSO authorization.” |
+| Rate limit / 403 | “GitHub throttled us — wait ~an hour and we can retry.” |
+| Run succeeded | “Your report is ready at …/combined-YYYY-MM.xlsx — open that file in Excel.” |
+
+Always state expected **wait time (~10–20 minutes)** once before a full fetch.
 
 ---
 
 ## Working on the codebase
 
-| Task | Where to look |
-|------|----------------|
-| Add CLI command | `docs/extending-the-cli.md`, `github_analysis/cli/commands/` |
-| Pipeline / phases | `docs/architecture.md`, `github_analysis/pipeline/runner.py` |
-| Output columns | `github_analysis/models.py`, `export/xlsx.py`, **update README.md** |
-| Default paths / org | `github_analysis/config.py` |
+| Task | Where |
+|------|--------|
+| Add CLI command | [docs/extending-the-cli.md](docs/extending-the-cli.md) |
+| Pipeline / phases | [docs/architecture.md](docs/architecture.md) |
 | Combined workbook logic | `scripts/combine_person_summaries.py` |
+| Defaults (org, output dir) | `github_analysis/config.py` |
 
-After changing CLI surface, output columns, or default output directory, update **README.md** and, if run behavior changes, **`~/Dev/github-analysis-results/README.md`** and **`AGENTS.md`** there (only with human permission for protected results docs — monthly run path changes are expected).
-
----
-
-## Module map (quick reference)
-
-| Command | Module |
-|---------|--------|
-| `analyze` | `github_analysis/cli/commands/analyze.py` |
-| `export` | `github_analysis/cli/commands/export.py` |
-| `run` | `github_analysis/cli/commands/run.py` |
-
-Full architecture: [docs/architecture.md](docs/architecture.md).
+After changing CLI, columns, or monthly workflow: **update README.md first**, then adjust this file only if agent behavior changes.

@@ -4,11 +4,13 @@ Pull **per-person engineering metrics** from any GitHub repository you can acces
 
 Uses the [GitHub CLI](https://cli.github.com/) (`gh`) for API access. See [Install and setup](#install-and-setup) for prerequisites, token setup, and verification.
 
+**Platform guides:** [macOS (MacBook)](#macos-macbook--setup-and-monthly-report) · [Windows](#windows--setup-and-monthly-report)
+
 ---
 
 ## Monthly combined workbook (CEDT)
 
-**Primary deliverable each month:** `~/Dev/github-analysis-results/combined-YYYY-MM.xlsx`
+**Primary deliverable each month:** `{output-dir}/combined-YYYY-MM.xlsx` (default output dir: `~/github-analysis-results/` — see [Output directory configuration](#output-directory-configuration))
 
 That workbook has four sheets:
 
@@ -34,10 +36,17 @@ gh repo view Customer-Engagement-Digital-Technology/global-services
 
 ### Each month — run in Terminal
 
-Replace `YYYY-MM` with the calendar month you are reporting (e.g. `2026-07` for all of July 2026):
+Replace `YYYY-MM` with the calendar month you are reporting (e.g. `2026-07` for all of July 2026).
+
+| Platform | Instructions |
+|----------|----------------|
+| **MacBook (macOS)** | [macOS guide — monthly report](#macos-macbook--setup-and-monthly-report) |
+| **Windows** | [Windows guide — monthly report](#windows--setup-and-monthly-report) |
+
+Generic command (macOS Terminal or Windows Git Bash), run from **wherever you cloned this repo**:
 
 ```bash
-cd ~/Dev/michaelwitz-sbd/github-analysis
+cd /path/to/github-analysis
 ./scripts/run_monthly.sh YYYY-MM
 ```
 
@@ -47,11 +56,13 @@ cd ~/Dev/michaelwitz-sbd/github-analysis
 ./scripts/run_monthly.sh 2026-07
 ```
 
-When it finishes, open:
+When it finishes, open the combined workbook in your configured output folder (default):
 
 ```text
-~/Dev/github-analysis-results/combined-2026-07.xlsx
+~/github-analysis-results/combined-2026-07.xlsx
 ```
+
+On Windows (PowerShell): `%USERPROFILE%\github-analysis-results\combined-2026-07.xlsx`
 
 **Dry-run** (prints the date window and output paths without fetching):
 
@@ -59,9 +70,17 @@ When it finishes, open:
 ./scripts/run_monthly.sh 2026-07 --dry-run
 ```
 
+**Custom output folder** — `--output-dir` overrides `GITHUB_ANALYSIS_RESULTS` for this run:
+
+```bash
+./scripts/run_monthly.sh 2026-07 --output-dir ~/Reports/github-metrics
+```
+
+See [Output directory configuration](#output-directory-configuration).
+
 ### What the monthly script creates
 
-All files land in **`~/Dev/github-analysis-results/`** (flat folder; the date window is in each filename):
+All files land in the **resolved output directory** (default `~/github-analysis-results/`; see [Output directory configuration](#output-directory-configuration)):
 
 | File | Purpose |
 |------|---------|
@@ -85,29 +104,38 @@ Flags applied automatically: **`--merged-only`**, US Eastern (`America/New_York`
 ### Partial month (not a full calendar month)
 
 ```bash
-cd ~/Dev/michaelwitz-sbd/github-analysis
+cd /path/to/github-analysis
 ./scripts/run_cedt_trio.sh START END
 ```
 
 `END` is **exclusive** — for June 1–23 inclusive use `2026-06-01` and `2026-06-24`.
 
-Produces `combined-START_to_END.xlsx` in `~/Dev/github-analysis-results/`.
+Produces `combined-START_to_END.xlsx` in your output directory.
 
 ### Rebuild combined Excel only (no GitHub fetch)
 
 If per-repo `*_person_summary.tsv` files already exist:
 
 ```bash
-cd ~/Dev/michaelwitz-sbd/github-analysis
+cd /path/to/github-analysis
 uv run python scripts/combine_person_summaries.py \
-  --input-dir ~/Dev/github-analysis-results \
+  --input-dir ~/github-analysis-results \
   --stem-suffix "2026-07-01_to_2026-08-01" \
-  -o ~/Dev/github-analysis-results/combined-2026-07.xlsx
+  -o ~/github-analysis-results/combined-2026-07.xlsx
 ```
 
 Use `--stem-suffix` when the results folder contains more than one date window.
 
-Human runbook: [docs/monthly-runbook.md](docs/monthly-runbook.md) and **`~/Dev/github-analysis-results/README.md`** (local output folder).
+Human runbook: [docs/monthly-runbook.md](docs/monthly-runbook.md) (links back here). **Using Cursor or another AI assistant?** See [AGENTS.md](AGENTS.md).
+
+### Not comfortable with Terminal?
+
+Ask an assistant (or a colleague) to run the monthly script for you after [one-time setup](#install-and-setup). You only need to complete **GitHub login** (`gh auth login`) if prompted. The report file will be in your output folder (default `~/github-analysis-results/combined-YYYY-MM.xlsx`).
+
+**Open the file:**
+- **macOS:** Finder → **Go → Go to Folder…** → `~/github-analysis-results`
+- **Windows:** File Explorer address bar → `%USERPROFILE%\github-analysis-results`
+- **Linux:** file manager → `~/github-analysis-results`
 
 ---
 
@@ -151,21 +179,167 @@ Example: `global-services_2026-05-15_to_2026-06-01_run.log` for May 15–31 does
 
 ---
 
-## Install and setup
+## macOS (MacBook) — setup and monthly report
 
-Everything needed before your first report: install tools, clone the project, authenticate `gh`, and verify access.
+One-time setup, then one command each month. No `~/Dev` folder required — use any path you prefer.
+
+### One-time setup (Mac)
+
+1. Open **Terminal** (Applications → Utilities → Terminal).
+
+2. Install tools:
+
+```bash
+# GitHub CLI (if you use Homebrew)
+brew install gh
+
+# uv (Python runner for this project)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# Restart Terminal, then:
+uv --version
+gh --version
+```
+
+3. Clone and install the project (example path — change if you like):
+
+```bash
+git clone https://github.com/michaelwitz-sbd/github-analysis.git ~/Projects/github-analysis
+cd ~/Projects/github-analysis
+uv sync --group excel
+```
+
+4. Sign in to GitHub:
+
+```bash
+gh auth login
+gh auth status
+gh repo view Customer-Engagement-Digital-Technology/global-services
+```
+
+5. *(Optional)* Set a custom report folder in `~/.zshrc`:
+
+```bash
+export GITHUB_ANALYSIS_RESULTS=~/Documents/GitHubReports
+mkdir -p "$GITHUB_ANALYSIS_RESULTS"
+```
+
+If you skip step 5, reports go to **`~/github-analysis-results/`** (created automatically).
+
+### Each month (Mac)
+
+```bash
+cd ~/Projects/github-analysis    # your clone path
+./scripts/run_monthly.sh 2026-07
+```
+
+Allow **10–20 minutes**. When it finishes, open:
+
+```text
+~/github-analysis-results/combined-2026-07.xlsx
+```
+
+(or `$GITHUB_ANALYSIS_RESULTS/combined-2026-07.xlsx` if you set the env var)
+
+**Finder:** **Go → Go to Folder…** → paste `~/github-analysis-results` → double-click `combined-2026-07.xlsx`.
+
+**Dry-run:** `./scripts/run_monthly.sh 2026-07 --dry-run`
+
+**Custom folder for one month:** `./scripts/run_monthly.sh 2026-07 --output-dir ~/Desktop/july-check`
+
+---
+
+## Windows — setup and monthly report
+
+One-time setup, then one command each month. Default output: **`%USERPROFILE%\github-analysis-results`**.
+
+### One-time setup (Windows)
+
+1. Open **PowerShell** (or **Git Bash** for the monthly shell script).
+
+2. Install tools — pick one method for each:
+
+**GitHub CLI** — [Installer](https://cli.github.com/) or:
+
+```powershell
+winget install --id GitHub.cli
+```
+
+**uv** — see [uv Windows install](https://docs.astral.sh/uv/getting-started/installation/), then restart the terminal and run `uv --version`.
+
+3. Clone and install (example path):
+
+```powershell
+git clone https://github.com/michaelwitz-sbd/github-analysis.git $HOME\github-analysis
+cd $HOME\github-analysis
+uv sync --group excel
+uv run github-analysis --version
+```
+
+4. Sign in to GitHub:
+
+```powershell
+gh auth login
+gh auth status
+gh repo view Customer-Engagement-Digital-Technology/global-services
+```
+
+5. *(Optional)* Set a custom report folder for the current PowerShell session:
+
+```powershell
+$env:GITHUB_ANALYSIS_RESULTS = "$HOME\Documents\GitHubReports"
+New-Item -ItemType Directory -Force -Path $env:GITHUB_ANALYSIS_RESULTS
+```
+
+To persist, add that line to your [PowerShell profile](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_profiles).
+
+If you skip step 5, reports go to **`%USERPROFILE%\github-analysis-results`** (created automatically).
+
+### Each month (Windows)
+
+**Recommended:** **Git Bash** (installed with [Git for Windows](https://git-scm.com/download/win)):
+
+```bash
+cd ~/github-analysis          # your clone path
+./scripts/run_monthly.sh 2026-07
+```
+
+Allow **10–20 minutes**. When it finishes, open:
+
+```text
+C:\Users\YourName\github-analysis-results\combined-2026-07.xlsx
+```
+
+**File Explorer:** click the address bar → paste `%USERPROFILE%\github-analysis-results` → open `combined-2026-07.xlsx`.
+
+**Dry-run:** `./scripts/run_monthly.sh 2026-07 --dry-run`
+
+**Custom folder for one month:** `./scripts/run_monthly.sh 2026-07 --output-dir "$HOME/Documents/july-check"`
+
+**PowerShell-only (no Git Bash):** use the CLI directly for a single repo, or install Git Bash/WSL for the full monthly trio script. Example single-repo run:
+
+```powershell
+cd $HOME\github-analysis
+uv run github-analysis run --repo global-services --month 2026-07 --merged-only --output-dir "$env:USERPROFILE\github-analysis-results"
+```
+
+For the full three-repo **combined** workbook without bash, use **Git Bash** and `./scripts/run_monthly.sh` as above.
+
+---
+
+## Install and setup (reference)
+
+Everything needed before your first report. **Start with the platform guides:** [macOS (MacBook)](#macos-macbook--setup-and-monthly-report) · [Windows](#windows--setup-and-monthly-report).
 
 ### Prerequisites
 
 | Tool | Version | Purpose |
 |------|---------|---------|
 | [uv](https://docs.astral.sh/uv/) | latest | Python runtime and project dependencies |
-| [GitHub CLI](https://cli.github.com/) (`gh`) | 2.30+ | All GitHub API calls (`gh api`) — **must be installed and authenticated** |
+| [GitHub CLI](https://cli.github.com/) (`gh`) | 2.30+ | All GitHub API calls — **must be installed and authenticated** |
 | **GitHub PAT or `gh auth login`** | — | Token with **`repo`** scope (classic) or fine-grained read on pull requests + contents |
 | GitHub account | — | Read access to the repository you will analyze |
-| Network | — | Reach `github.com` (no proxy config in this tool) |
 
-Default report output directory: **`~/Dev/github-analysis-results/`** (override with `--output-dir` or `GITHUB_ANALYSIS_RESULTS`).
+Default report output: **`~/github-analysis-results`** (macOS/Linux) or **`%USERPROFILE%\github-analysis-results`** (Windows). See [Output directory configuration](#output-directory-configuration).
 
 ### 1. Install `uv`
 
@@ -243,6 +417,95 @@ Each run also performs a **preflight** check (auth + repo read access) and write
 
 ---
 
+## Output directory configuration
+
+All report files (Excel, TSV, JSON cache, run log) are written to one **output directory**. Filenames include the repo and date window; only the folder is configurable.
+
+### Precedence (highest wins)
+
+| Priority | Setting | Example |
+|----------|---------|---------|
+| 1 | **`--output-dir`** on the command line | `--output-dir ~/Reports/github-metrics` |
+| 2 | **`GITHUB_ANALYSIS_RESULTS`** environment variable | `export GITHUB_ANALYSIS_RESULTS=~/Reports/github-metrics` |
+| 3 | Built-in default | `~/github-analysis-results` (your home directory; folder is created if missing) |
+
+**If both the environment variable and `--output-dir` are set, the CLI flag wins** for that run.
+
+### Platforms and paths
+
+- **macOS, Linux, and Windows** are supported (`uv` and `gh` on each platform).
+- **You do not need a `~/Dev` directory.** Clone this repo anywhere (e.g. `~/Projects/github-analysis`, `C:\Users\you\github-analysis`).
+- **Default report output** is **`~/github-analysis-results`** on macOS/Linux, or **`%USERPROFILE%\github-analysis-results`** on Windows. The tool creates the folder on first run.
+- **Pick any output folder** with `GITHUB_ANALYSIS_RESULTS` or `--output-dir` (team share, Documents, Desktop, etc.).
+- **Monthly shell scripts** (`run_monthly.sh`, `run_cedt_trio.sh`) require **bash** — built-in on macOS/Linux; on Windows use **Git Bash**, **WSL**, or run the equivalent `uv run github-analysis` commands from README.
+
+**Windows — set output folder (PowerShell, persistent for session):**
+
+```powershell
+$env:GITHUB_ANALYSIS_RESULTS = "$HOME\Documents\GitHubReports"
+New-Item -ItemType Directory -Force -Path $env:GITHUB_ANALYSIS_RESULTS
+```
+
+**Windows — one-off CLI override:**
+
+```powershell
+uv run github-analysis run --repo global-services --month 2026-07 --merged-only `
+  --output-dir "$HOME\Documents\GitHubReports"
+```
+
+### Environment variable (persistent default)
+
+Set once in your shell profile so every run uses the same folder without repeating `--output-dir`:
+
+```bash
+export GITHUB_ANALYSIS_RESULTS=~/Reports/github-metrics
+mkdir -p "$GITHUB_ANALYSIS_RESULTS"
+```
+
+Then:
+
+```bash
+uv run github-analysis run --repo global-services --month 2026-07 --merged-only
+# writes under ~/Reports/github-metrics/
+```
+
+Monthly scripts honor the same variable:
+
+```bash
+./scripts/run_monthly.sh 2026-07
+# combined-2026-07.xlsx and per-repo files under $GITHUB_ANALYSIS_RESULTS
+```
+
+### CLI flag (one-off override)
+
+Override the env var for a single command:
+
+```bash
+uv run github-analysis run --repo global-services --month 2026-07 --merged-only \
+  --output-dir ~/Desktop/july-spot-check
+```
+
+Monthly scripts:
+
+```bash
+./scripts/run_monthly.sh 2026-07 --output-dir ~/Desktop/july-spot-check
+./scripts/run_cedt_trio.sh 2026-06-01 2026-06-24 --output-dir ~/Reports/github-metrics
+```
+
+### `-o` / `--output` (explicit file path)
+
+When you pass `-o path/to/report.xlsx`, sibling TSV, cache, and log files are written next to that Excel file. **`--output-dir` applies when `-o` is omitted** (auto-named files).
+
+### CLI help
+
+```bash
+uv run github-analysis --help
+uv run github-analysis run --help
+uv run github-analysis analyze --help
+```
+
+---
+
 ## Commands
 
 | Command | Description |
@@ -268,7 +531,7 @@ All commands: `uv run github-analysis <command> --help`
 | `-o`, `--output` | run | Excel path (`.xlsx`); writes sibling TSV files |
 | `-o`, `--output` | analyze | Detail TSV path (`-` = stdout) |
 | `-o`, `--output` | export | Excel path (required) |
-| `--output-dir` | analyze, run | Output folder when `-o` omitted (default `~/Dev/github-analysis-results`) |
+| `--output-dir` | analyze, run | Folder for auto-named TSV, Excel, cache, log. **Overrides `GITHUB_ANALYSIS_RESULTS`.** See [Output directory configuration](#output-directory-configuration). |
 | `--from-cache` | analyze | Rebuild TSV from `{name}_raw.json` without GitHub fetch |
 | `--summary-output` | analyze | Custom path for person summary TSV |
 | `--no-summary` | analyze | Skip person summary TSV |
@@ -337,7 +600,7 @@ uv run github-analysis run \
   --repo global-services \
   --month 2026-05 \
   --merged-only --workers 4
-# → ~/Dev/github-analysis-results/global-services_2026-05-01_to_2026-06-01.xlsx (+ siblings)
+# → ~/github-analysis-results/global-services_2026-05-01_to_2026-06-01.xlsx (+ siblings)
 ```
 
 **Three repos + combined workbook** — use the [monthly script](#each-month--run-in-terminal) or `scripts/run_cedt_trio.sh`.
@@ -349,29 +612,29 @@ uv run github-analysis analyze \
   --repo global-services \
   --start-date 2026-05-01 --end-date 2026-06-01 \
   --merged-only --workers 4 \
-  -o ~/Dev/github-analysis-results/global-services-may-2026.tsv
+  -o ~/github-analysis-results/global-services-may-2026.tsv
 
 uv run github-analysis export \
-  --summary ~/Dev/github-analysis-results/global-services-may-2026_person_summary.tsv \
-  --detail ~/Dev/github-analysis-results/global-services-may-2026.tsv \
-  -o ~/Dev/github-analysis-results/global-services-may-2026.xlsx
+  --summary ~/github-analysis-results/global-services-may-2026_person_summary.tsv \
+  --detail ~/github-analysis-results/global-services-may-2026.tsv \
+  -o ~/github-analysis-results/global-services-may-2026.xlsx
 ```
 
 **Rebuild from cache** (no GitHub fetch; person summary recomputed from cached timestamps):
 
 ```bash
 uv run github-analysis analyze \
-  --from-cache ~/Dev/github-analysis-results/global-services-may-2026_raw.json \
+  --from-cache ~/github-analysis-results/global-services-may-2026_raw.json \
   --repo global-services \
   --start-date 2026-05-01 --end-date 2026-06-01 \
   --merged-only \
-  -o ~/Dev/github-analysis-results/global-services-may-2026.tsv
+  -o ~/github-analysis-results/global-services-may-2026.tsv
 ```
 
 **Monitor a run** (log path matches your `--start-date` and `--end-date`; written as soon as the run starts):
 
 ```bash
-tail -f ~/Dev/github-analysis-results/global-services_2026-05-15_to_2026-06-01_run.log
+tail -f ~/github-analysis-results/global-services_2026-05-15_to_2026-06-01_run.log
 ```
 
 ---
@@ -513,7 +776,8 @@ Edit `github_analysis/config.py`:
 |---------|---------|---------|
 | `DEFAULT_REPORT_TZ_NAME` / `--timezone` | `America/New_York` | Calendar dates and timestamps (override per run) |
 | `DEFAULT_GITHUB_OWNER` | `Customer-Engagement-Digital-Technology` | Org for short `--repo` names |
-| `DEFAULT_OUTPUT_DIR` | `~/Dev/github-analysis-results` | Default output folder |
+| `DEFAULT_OUTPUT_DIR` | `~/Dev/github-analysis-results` | Default output folder when env var unset |
+| `GITHUB_ANALYSIS_RESULTS` | — | Environment variable override for output folder (see [Output directory](#output-directory)) |
 | `DEFAULT_FETCH_WORKERS` | `4` | Default `--workers` |
 
 ---

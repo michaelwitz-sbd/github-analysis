@@ -6,13 +6,14 @@ import sys
 
 from github_analysis.cli.commands import analyze, export
 from github_analysis.cli.commands.analyze import MERGED_ONLY_HELP, OUTPUT_FILES_EPILOG
+from github_analysis.cli.output_dir import add_output_dir_argument, apply_output_dir
 from github_analysis.cli.report_window import (
     add_period_args,
     apply_resolved_window_to_args,
     date_window_note,
     resolve_report_window,
 )
-from github_analysis.config import DEFAULT_FETCH_WORKERS, DEFAULT_OUTPUT_DIR
+from github_analysis.config import DEFAULT_FETCH_WORKERS, default_output_dir
 from github_analysis.export.paths import (
     default_detail_path,
     default_summary_path,
@@ -45,7 +46,10 @@ def register(subparsers: argparse._SubParsersAction) -> None:
             "  github-analysis run --repo global-services --start-date 2026-05-15 --end-date 2026-06-01 --merged-only\n"
             "  # Custom Excel base name (sibling TSV, cache, and log share this stem):\n"
             "  github-analysis run --repo global-services --month 2026-05 --merged-only --workers 4 \\\n"
-            "    -o ~/Documents/global-services-may-2026.xlsx"
+            "    -o ~/Reports/global-services-may-2026.xlsx\n"
+            "  # All outputs under a custom directory:\n"
+            "  github-analysis run --repo global-services --month 2026-05 --merged-only \\\n"
+            "    --output-dir ~/Reports/github-metrics"
         ),
     )
     analyze._add_repo_args(parser)
@@ -60,20 +64,15 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Excel workbook contains only the Individual Production sheet",
     )
-    parser.add_argument(
-        "--output-dir",
-        default=DEFAULT_OUTPUT_DIR,
-        metavar="DIR",
-        help=f"Directory for auto-named files when -o is not used (default: {DEFAULT_OUTPUT_DIR})",
-    )
+    add_output_dir_argument(parser)
     parser.add_argument(
         "-o",
         "--output",
         metavar="PATH",
         help=(
-            f"Excel workbook path (.xlsx). Default: {DEFAULT_OUTPUT_DIR}/{{repo}}_{{start}}_to_{{end}}.xlsx. "
-            "Also writes sibling files: {{stem}}.tsv, {{stem}}_person_summary.tsv, "
-            "{{stem}}_raw.json, {{stem}}_run.log"
+            "Excel workbook path (.xlsx). When omitted, writes under --output-dir as "
+            "{repo}_{start}_to_{end}.xlsx. Also writes sibling files: {stem}.tsv, "
+            "{stem}_person_summary.tsv, {stem}_raw.json, {stem}_run.log"
         ),
     )
     parser.add_argument(
@@ -90,6 +89,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
+    apply_output_dir(args)
     try:
         repository = resolve_repository(args.repo, args.owner)
     except ValueError as exc:
