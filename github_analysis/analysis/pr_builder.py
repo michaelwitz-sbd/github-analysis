@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from github_analysis.config import PR_RESOURCE_FETCH_WORKERS
 from github_analysis.github.pulls import (
     PullRequestService,
     branch_start_from_commits,
     commits_before_after_open,
     file_counts,
+    line_counts,
 )
 from github_analysis.models import PullRequestRow, RepositoryRef
 from github_analysis.time_utils import parse_github_ts
@@ -92,12 +95,53 @@ def _pull_creator_login(detail: dict[str, Any]) -> str:
     return ((detail.get("user") or {}).get("login")) or ""
 
 
+def _fetch_pull_resources(
+    service: PullRequestService,
+    pull_number: int,
+    *,
+    reviews: Optional[list[dict[str, Any]]] = None,
+    resource_workers: int = PR_RESOURCE_FETCH_WORKERS,
+) -> tuple[
+    tuple[list[dict[str, Any]], bool],
+    tuple[list[dict[str, Any]], bool],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+]:
+    if resource_workers <= 1:
+        commits = service.commits(pull_number)
+        files = service.files(pull_number)
+        events = service.issue_events(pull_number)
+        fetched_reviews = reviews if reviews is not None else service.reviews(pull_number)
+        comments = service.issue_comments(pull_number)
+        return commits, files, events, fetched_reviews, comments
+
+    with ThreadPoolExecutor(max_workers=resource_workers) as executor:
+        futures = {
+            "commits": executor.submit(service.commits, pull_number),
+            "files": executor.submit(service.files, pull_number),
+            "events": executor.submit(service.issue_events, pull_number),
+            "comments": executor.submit(service.issue_comments, pull_number),
+        }
+        if reviews is None:
+            futures["reviews"] = executor.submit(service.reviews, pull_number)
+
+        commits = futures["commits"].result()
+        files = futures["files"].result()
+        events = futures["events"].result()
+        fetched_reviews = reviews if reviews is not None else futures["reviews"].result()
+        comments = futures["comments"].result()
+
+    return commits, files, events, fetched_reviews, comments
+
+
 def build_pull_request_row(
     service: PullRequestService,
     pull_number: int,
     *,
     report_author: Optional[str] = None,
     reviews: Optional[list[dict[str, Any]]] = None,
+    resource_workers: int = PR_RESOURCE_FETCH_WORKERS,
 ) -> tuple[PullRequestRow, list[dict[str, Any]]]:
     detail = service.detail(pull_number)
     creator = _pull_creator_login(detail)
@@ -111,20 +155,28 @@ def build_pull_request_row(
     merged = parse_github_ts(detail.get("merged_at"))
     closed_at = parse_github_ts(detail.get("closed_at"))
 
-    commits, commits_truncated = service.commits(pull_number)
+    (
+        (commits, commits_truncated),
+        (files, files_truncated),
+        events,
+        reviews,
+        comments,
+    ) = _fetch_pull_resources(
+        service,
+        pull_number,
+        reviews=reviews,
+        resource_workers=resource_workers,
+    )
+
     branch_start = branch_start_from_commits(commits)
     commits_before, commits_after = commits_before_after_open(commits, pr_created)
-    files, files_truncated = service.files(pull_number)
     total_files, added_files, modified_files, removed_files = file_counts(files)
+    lines_added, lines_removed = line_counts(files)
 
-    events = service.issue_events(pull_number)
     first_draft, ready = _first_draft_and_ready(
         pr_created or datetime.now(timezone.utc), events
     )
 
-    if reviews is None:
-        reviews = service.reviews(pull_number)
-    comments = service.issue_comments(pull_number)
     first_feedback = _first_feedback_time(reviews, comments)
     approved = _first_approval_time(reviews)
     approved_by = _first_approver_login(reviews)
@@ -157,6 +209,8 @@ def build_pull_request_row(
             pr_files_added=added_files,
             pr_files_modified=modified_files,
             pr_files_removed=removed_files,
+            pr_lines_added=lines_added,
+            pr_lines_removed=lines_removed,
             pr_commits_total=len(commits),
             pr_commits_before_pr_open=commits_before,
             pr_commits_after_pr_open=commits_after,

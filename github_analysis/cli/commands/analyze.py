@@ -11,7 +11,12 @@ from github_analysis.cli.report_window import (
     date_window_note,
     resolve_report_window,
 )
-from github_analysis.config import DEFAULT_GITHUB_OWNER, DEFAULT_OUTPUT_DIR, DEFAULT_FETCH_WORKERS
+from github_analysis.config import (
+    DEFAULT_FETCH_WORKERS,
+    DEFAULT_GITHUB_OWNER,
+    DEFAULT_OUTPUT_DIR,
+    PR_RESOURCE_FETCH_WORKERS,
+)
 from github_analysis.export.paths import (
     default_detail_path,
     sibling_paths_from_detail,
@@ -32,7 +37,7 @@ MERGED_ONLY_HELP = (
 FROM_CACHE_HELP = (
     "Skip GitHub fetch; rebuild TSV from *_raw.json. Metrics use the cache's repo "
     "and date window; --repo and --month (or --start-date/--end-date) affect output "
-    "paths only. --workers is ignored"
+    "paths only. Fetch worker flags are ignored"
 )
 
 OUTPUT_FILES_EPILOG = (
@@ -105,6 +110,16 @@ def register(subparsers: argparse._SubParsersAction) -> None:
             "Use 1 for serial fetch."
         ),
     )
+    parser.add_argument(
+        "--pr-resource-workers",
+        type=int,
+        default=PR_RESOURCE_FETCH_WORKERS,
+        metavar="N",
+        help=(
+            "Parallel resource fetches inside each PR detail worker "
+            f"(default: {PR_RESOURCE_FETCH_WORKERS}; use 1 for serial baseline)."
+        ),
+    )
     parser.set_defaults(handler=run)
 
 
@@ -167,6 +182,9 @@ def run(args: argparse.Namespace) -> int:
     if getattr(args, "workers", DEFAULT_FETCH_WORKERS) < 1:
         print("Error: --workers must be at least 1", file=sys.stderr)
         return 2
+    if getattr(args, "pr_resource_workers", PR_RESOURCE_FETCH_WORKERS) < 1:
+        print("Error: --pr-resource-workers must be at least 1", file=sys.stderr)
+        return 2
 
     detail_path = _resolve_detail_path(args, repository.name)
     if detail_path:
@@ -216,6 +234,7 @@ def _execute(
                 log=log,
                 raw_cache_path=raw_cache_path,
                 workers=args.workers,
+                resource_workers=args.pr_resource_workers,
             )
     except Exception as exc:
         emit_error(str(exc))

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import subprocess
-from time import sleep
+from threading import BoundedSemaphore, Lock
+from time import monotonic, sleep
 from typing import Any, Optional
 
 from github_analysis.config import (
+    GH_API_MAX_IN_FLIGHT,
+    GH_API_MIN_INTERVAL_SEC,
     GH_API_RETRIES,
     GH_API_RETRY_BASE_SEC,
     GH_API_TIMEOUT_SEC,
@@ -27,10 +30,30 @@ def _transient_gh_failure(message: str) -> bool:
             "502",
             "504",
             "429",
+            "api rate limit exceeded",
+            "secondary rate limit",
+            "abuse detection",
             "tls handshake",
             "i/o timeout",
         )
     )
+
+
+_GH_API_SEMAPHORE = BoundedSemaphore(GH_API_MAX_IN_FLIGHT)
+_GH_API_RATE_LOCK = Lock()
+_GH_API_NEXT_START = 0.0
+
+
+def _wait_for_rate_slot() -> None:
+    global _GH_API_NEXT_START
+    if GH_API_MIN_INTERVAL_SEC <= 0:
+        return
+    with _GH_API_RATE_LOCK:
+        now = monotonic()
+        wait = max(0.0, _GH_API_NEXT_START - now)
+        _GH_API_NEXT_START = max(now, _GH_API_NEXT_START) + GH_API_MIN_INTERVAL_SEC
+    if wait:
+        sleep(wait)
 
 
 class GhClient:
@@ -52,12 +75,14 @@ class GhClient:
         last_error: Optional[BaseException] = None
         for attempt in range(1, GH_API_RETRIES + 1):
             try:
-                proc = subprocess.run(
-                    args,
-                    capture_output=True,
-                    text=True,
-                    timeout=GH_API_TIMEOUT_SEC,
-                )
+                _wait_for_rate_slot()
+                with _GH_API_SEMAPHORE:
+                    proc = subprocess.run(
+                        args,
+                        capture_output=True,
+                        text=True,
+                        timeout=GH_API_TIMEOUT_SEC,
+                    )
             except subprocess.TimeoutExpired as exc:
                 last_error = exc
                 if attempt < GH_API_RETRIES and _transient_gh_failure(str(exc)):

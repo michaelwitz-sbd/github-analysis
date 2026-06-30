@@ -107,3 +107,32 @@ def collect_approval_counts_by_user(
         reviews_cache=reviews_cache,
         approved_only=True,
     )
+
+
+def collect_first_review_activity_by_user(
+    service: PullRequestService,
+    pull_numbers: list[int],
+    start_inclusive_utc: datetime,
+    end_exclusive_utc: datetime,
+    *,
+    reviews_cache: Optional[dict[int, list[dict[str, Any]]]] = None,
+) -> dict[str, datetime]:
+    """Earliest review submission timestamp per reviewer in the report window."""
+    cache = reviews_cache if reviews_cache is not None else {}
+    first_by_user: dict[str, datetime] = {}
+    for pull_number in sorted(set(pull_numbers)):
+        if pull_number not in cache:
+            cache[pull_number] = service.reviews(pull_number)
+        for review in cache[pull_number]:
+            submitted = parse_github_ts(review.get("submitted_at"))
+            if submitted is None:
+                continue
+            if submitted < start_inclusive_utc or submitted >= end_exclusive_utc:
+                continue
+            login = ((review.get("user") or {}).get("login")) or ""
+            if not login:
+                continue
+            current = first_by_user.get(login)
+            if current is None or submitted < current:
+                first_by_user[login] = submitted
+    return first_by_user

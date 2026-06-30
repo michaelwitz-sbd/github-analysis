@@ -46,6 +46,8 @@ class PullRequestRow:
     pr_files_added: int = 0
     pr_files_modified: int = 0
     pr_files_removed: int = 0
+    pr_lines_added: Optional[int] = None
+    pr_lines_removed: Optional[int] = None
     pr_commits_total: int = 0
     pr_commits_before_pr_open: Optional[int] = None
     pr_commits_after_pr_open: Optional[int] = None
@@ -77,3 +79,4 @@ class ReportResult:
     skipped_pr_numbers: list[int] = field(default_factory=list)
     start_utc: Optional[datetime] = None
     end_exclusive_utc: Optional[datetime] = None
+    review_first_activity_by_user: dict[str, datetime] = field(default_factory=dict)

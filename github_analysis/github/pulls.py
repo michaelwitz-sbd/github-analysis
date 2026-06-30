@@ -91,3 +91,12 @@ def file_counts(files: list[dict[str, Any]]) -> tuple[int, int, int, int]:
         else:
             modified += 1
     return len(files), added, modified, removed
+
+
+def line_counts(files: list[dict[str, Any]]) -> tuple[int, int]:
+    additions = 0
+    deletions = 0
+    for file_row in files:
+        additions += int(file_row.get("additions") or 0)
+        deletions += int(file_row.get("deletions") or 0)
+    return additions, deletions

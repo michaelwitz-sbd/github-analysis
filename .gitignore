@@ -3,4 +3,8 @@ analysis-results/
 
 .DS_Store
 .venv/
+results/
 
+# Local generated cache snapshots for HTML/report rebuilds.
+data/*
+!data/.gitkeep

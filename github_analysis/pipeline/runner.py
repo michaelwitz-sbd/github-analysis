@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
+from time import perf_counter
 from typing import Any, Optional
 
 from github_analysis.analysis.authored_activity import (
@@ -14,6 +15,7 @@ from github_analysis.analysis.authored_activity import (
 from github_analysis.analysis.pr_builder import build_pull_request_row
 from github_analysis.analysis.reviews import (
     collect_approval_counts_by_user,
+    collect_first_review_activity_by_user,
     collect_review_counts_by_user,
 )
 from github_analysis.analysis.summaries import compute_user_summaries
@@ -26,12 +28,16 @@ from github_analysis.catalog.search import (
     build_review_catalog,
     group_prs_by_user,
 )
-from github_analysis.config import DEFAULT_FETCH_WORKERS
+from github_analysis.config import DEFAULT_FETCH_WORKERS, PR_RESOURCE_FETCH_WORKERS
 from github_analysis.github.client import GhClient
 from github_analysis.github.pulls import PullRequestService
 from github_analysis.logging.run_log import RunLog
 from github_analysis.models import PullRequestRow, ReportConfig, ReportResult, RepositoryRef
 from github_analysis.time_utils import iso_utc_z, window_bounds_utc
+
+
+def _elapsed(start: float) -> str:
+    return f"{perf_counter() - start:.1f}s"
 
 
 def _log_person_coverage(
@@ -89,11 +95,15 @@ def _fetch_pr_detail(
     repository: RepositoryRef,
     pull_number: int,
     report_author: str,
+    resource_workers: int,
 ) -> tuple[int, Optional[PullRequestRow], list[dict[str, Any]], Optional[str]]:
     try:
         service = PullRequestService(GhClient(), repository)
         row, reviews = build_pull_request_row(
-            service, pull_number, report_author=report_author
+            service,
+            pull_number,
+            report_author=report_author,
+            resource_workers=resource_workers,
         )
         return pull_number, row, reviews, None
     except Exception as exc:
@@ -105,6 +115,7 @@ def _fetch_pr_details(
     repository: RepositoryRef,
     grouped: list[tuple[str, list[int]]],
     workers: int,
+    resource_workers: int,
     emit,
     emit_error,
 ) -> tuple[list[PullRequestRow], dict[int, list[dict[str, Any]]], list[int]]:
@@ -125,7 +136,9 @@ def _fetch_pr_details(
         emit("Phase 2: fetching pull request details (serial)")
         for index, (pull_number, author) in enumerate(tasks, start=1):
             emit(f"[{index}/{total_prs}] PR #{pull_number} ({author})")
-            _, row, reviews, error = _fetch_pr_detail(repository, pull_number, author)
+            _, row, reviews, error = _fetch_pr_detail(
+                repository, pull_number, author, resource_workers
+            )
             if error:
                 skipped.append(pull_number)
                 emit_error(f"Skip PR #{pull_number} ({author}): {error}")
@@ -142,7 +155,13 @@ def _fetch_pr_details(
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         future_to_task = {
-            executor.submit(_fetch_pr_detail, repository, pull_number, author): (
+            executor.submit(
+                _fetch_pr_detail,
+                repository,
+                pull_number,
+                author,
+                resource_workers,
+            ): (
                 pull_number,
                 author,
             )
@@ -172,6 +191,7 @@ def run_report(
     log: Optional[RunLog] = None,
     raw_cache_path: Optional[str] = None,
     workers: int = DEFAULT_FETCH_WORKERS,
+    resource_workers: int = PR_RESOURCE_FETCH_WORKERS,
 ) -> ReportResult:
     """Collect PR detail rows and per-person summaries for one repository."""
     emit = log.info if log else lambda msg: None
@@ -180,6 +200,8 @@ def run_report(
 
     if workers < 1:
         raise ValueError("--workers must be at least 1")
+    if resource_workers < 1:
+        raise ValueError("--pr-resource-workers must be at least 1")
 
     client = GhClient()
     service = PullRequestService(client, config.repository)
@@ -196,8 +218,10 @@ def run_report(
     if config.merged_only:
         emit("Mode: merged PRs only")
     emit(f"Fetch workers: {workers}")
+    emit(f"Per-PR resource workers: {resource_workers}")
 
     emit("Phase 1: discovering pull requests")
+    phase_start = perf_counter()
     search_warnings: list[str] = []
     try:
         activity_catalog, activity_warnings = build_activity_catalog(
@@ -256,17 +280,22 @@ def run_report(
         emit(f"  catalog author: {author}")
     if not authors:
         emit_warn("No PRs matched the date window and filters")
+    emit(f"Phase 1 duration: {_elapsed(phase_start)}")
 
     grouped = group_prs_by_user(activity_catalog)
+    phase_start = perf_counter()
     rows, reviews_cache, skipped = _fetch_pr_details(
         repository=config.repository,
         grouped=grouped,
         workers=workers,
+        resource_workers=resource_workers,
         emit=emit,
         emit_error=emit_error,
     )
+    emit(f"Phase 2 duration: {_elapsed(phase_start)}")
 
     emit("Phase 3: building individual person summary")
+    phase_start = perf_counter()
     try:
         review_counts = collect_review_counts_by_user(
             service,
@@ -282,11 +311,20 @@ def run_report(
             end_exclusive_utc,
             reviews_cache=reviews_cache,
         )
+        review_first_activity = collect_first_review_activity_by_user(
+            service,
+            list(review_catalog.keys()),
+            start_utc,
+            end_exclusive_utc,
+            reviews_cache=reviews_cache,
+        )
     except Exception as exc:
         emit_error(f"Review aggregation failed: {exc}")
         raise
+    emit(f"Phase 3 duration: {_elapsed(phase_start)}")
 
     emit("Phase 3b: authored, merged-in-window, and open-at-month-end counts")
+    phase_start = perf_counter()
     rows_by_pr = {row.pr_number: row for row in rows}
     try:
         created_pr_states = build_pr_states(
@@ -345,7 +383,9 @@ def run_report(
     except Exception as exc:
         emit_error(f"Authored/open-at-month-end aggregation failed: {exc}")
         raise
+    emit(f"Phase 3b duration: {_elapsed(phase_start)}")
 
+    phase_start = perf_counter()
     summaries = compute_user_summaries(
         rows,
         review_counts,
@@ -357,6 +397,7 @@ def run_report(
         open_at_month_end_by_user=open_at_end_counts,
         closed_unmerged_in_window_by_user=closed_unmerged_counts,
     )
+    emit(f"Summary computation duration: {_elapsed(phase_start)}")
     emit(
         f"Fetch complete: {len(rows)} detail row(s); {len(summaries)} person row(s); "
         f"skipped {len(skipped)} PR(s)"
@@ -369,6 +410,7 @@ def run_report(
         skipped_pr_numbers=skipped,
         start_utc=start_utc,
         end_exclusive_utc=end_exclusive_utc,
+        review_first_activity_by_user=review_first_activity,
     )
 
     if log:

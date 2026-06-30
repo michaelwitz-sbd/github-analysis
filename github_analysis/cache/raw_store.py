@@ -71,6 +71,12 @@ def _row_from_dict(data: dict[str, Any]) -> PullRequestRow:
         pr_files_added=int(data.get("pr_files_added", 0)),
         pr_files_modified=int(data.get("pr_files_modified", 0)),
         pr_files_removed=int(data.get("pr_files_removed", 0)),
+        pr_lines_added=(
+            int(data["pr_lines_added"]) if data.get("pr_lines_added") is not None else None
+        ),
+        pr_lines_removed=(
+            int(data["pr_lines_removed"]) if data.get("pr_lines_removed") is not None else None
+        ),
         pr_commits_total=int(data.get("pr_commits_total", 0)),
         pr_commits_before_pr_open=data.get("pr_commits_before_pr_open"),
         pr_commits_after_pr_open=data.get("pr_commits_after_pr_open"),
@@ -215,6 +221,10 @@ def save_raw_cache(
         "review_catalog": {str(k): v for k, v in review_catalog.items()},
         "review_counts_by_user": review_counts_by_user,
         "approval_counts_by_user": approval_counts_by_user or {},
+        "review_first_activity_by_user": {
+            user: _dt_to_json(ts)
+            for user, ts in result.review_first_activity_by_user.items()
+        },
         "skipped_pr_numbers": result.skipped_pr_numbers,
         "rows": [_row_to_dict(row) for row in result.rows],
         "summaries": [asdict(summary) for summary in result.summaries],
@@ -224,9 +234,8 @@ def save_raw_cache(
     target.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def load_raw_cache(path: str) -> ReportResult:
-    """Rebuild ReportResult from a saved raw JSON cache."""
-    payload = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+def load_raw_payload(payload: dict[str, Any]) -> ReportResult:
+    """Rebuild ReportResult from a raw cache payload."""
     cfg = payload["config"]
     config = ReportConfig(
         repository=RepositoryRef(owner=cfg["repository"]["owner"], name=cfg["repository"]["name"]),
@@ -241,6 +250,11 @@ def load_raw_cache(path: str) -> ReportResult:
     }
     approval_counts = {
         key: int(value) for key, value in (payload.get("approval_counts_by_user") or {}).items()
+    }
+    review_first_activity = {
+        key: ts
+        for key, value in (payload.get("review_first_activity_by_user") or {}).items()
+        if (ts := _dt_from_json(value)) is not None
     }
     start_utc = _dt_from_json(payload.get("start_utc"))
     end_exclusive_utc = _dt_from_json(payload.get("end_exclusive_utc"))
@@ -268,4 +282,74 @@ def load_raw_cache(path: str) -> ReportResult:
         skipped_pr_numbers=[int(n) for n in payload.get("skipped_pr_numbers", [])],
         start_utc=start_utc,
         end_exclusive_utc=end_exclusive_utc,
+        review_first_activity_by_user=review_first_activity,
     )
+
+
+def recompute_summaries_from_payload(payload: dict[str, Any]) -> list:
+    """Recompute person summaries from a raw cache payload."""
+    rows = [_row_from_dict(row) for row in payload.get("rows", [])]
+    review_counts = {
+        key: int(value) for key, value in (payload.get("review_counts_by_user") or {}).items()
+    }
+    approval_counts = {
+        key: int(value) for key, value in (payload.get("approval_counts_by_user") or {}).items()
+    }
+    start_utc = _dt_from_json(payload.get("start_utc"))
+    end_exclusive_utc = _dt_from_json(payload.get("end_exclusive_utc"))
+    created_pr_states = _pr_states_from_json(payload.get("created_pr_states") or {})
+    open_pr_states = _pr_states_from_json(payload.get("open_pr_states") or {})
+    merged_pr_states = _pr_states_from_json(payload.get("merged_pr_states") or {})
+    if not open_pr_states:
+        open_pr_states = created_pr_states
+    if not merged_pr_states:
+        merged_pr_states = _legacy_merged_pr_states_from_rows(rows)
+    return _recompute_summaries(
+        rows=rows,
+        review_counts=review_counts,
+        approval_counts=approval_counts,
+        start_utc=start_utc,
+        end_exclusive_utc=end_exclusive_utc,
+        created_pr_states=created_pr_states,
+        open_pr_states=open_pr_states,
+        merged_pr_states=merged_pr_states,
+    )
+
+
+def update_payload_after_row_merge(
+    payload: dict[str, Any],
+    *,
+    merged_rows: list[PullRequestRow],
+    review_counts: dict[str, int],
+    approval_counts: dict[str, int],
+    review_first_activity: dict[str, datetime],
+    merged_pr_states: dict[int, dict[str, object]],
+    skipped_pr_numbers: list[int],
+) -> dict[str, Any]:
+    """Return an updated raw cache payload after recovering detail rows."""
+    summaries = recompute_summaries_from_payload(
+        {
+            **payload,
+            "rows": [_row_to_dict(row) for row in merged_rows],
+            "review_counts_by_user": review_counts,
+            "approval_counts_by_user": approval_counts,
+            "merged_pr_states": _pr_states_to_json(merged_pr_states),
+        }
+    )
+    updated_payload = dict(payload)
+    updated_payload["rows"] = [_row_to_dict(row) for row in merged_rows]
+    updated_payload["summaries"] = [asdict(summary) for summary in summaries]
+    updated_payload["review_counts_by_user"] = review_counts
+    updated_payload["approval_counts_by_user"] = approval_counts
+    updated_payload["review_first_activity_by_user"] = {
+        user: _dt_to_json(submitted) for user, submitted in review_first_activity.items()
+    }
+    updated_payload["merged_pr_states"] = _pr_states_to_json(merged_pr_states)
+    updated_payload["skipped_pr_numbers"] = skipped_pr_numbers
+    return updated_payload
+
+
+def load_raw_cache(path: str) -> ReportResult:
+    """Rebuild ReportResult from a saved raw JSON cache."""
+    payload = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    return load_raw_payload(payload)

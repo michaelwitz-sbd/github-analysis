@@ -49,6 +49,17 @@ def default_xlsx_path(
     return os.path.join(_output_dir(output_dir), f"{stem}.xlsx")
 
 
+def default_html_path(
+    repo_name: str,
+    start_date: str,
+    end_date: str,
+    *,
+    output_dir: str | None = None,
+) -> str:
+    stem = safe_repo_filename(repo_name, start_date, end_date).removesuffix(".tsv")
+    return os.path.join(_output_dir(output_dir), f"{stem}.html")
+
+
 def summary_path_from_detail(detail_path: str) -> str:
     if detail_path.endswith(".tsv"):
         return detail_path[:-4] + "_person_summary.tsv"
@@ -59,6 +70,12 @@ def xlsx_path_from_detail(detail_path: str) -> str:
     if detail_path.endswith(".tsv"):
         return detail_path[:-4] + ".xlsx"
     return detail_path + ".xlsx"
+
+
+def html_path_from_detail(detail_path: str) -> str:
+    if detail_path.endswith(".tsv"):
+        return detail_path[:-4] + ".html"
+    return detail_path + ".html"
 
 
 def run_log_path_from_detail(detail_path: str) -> str:
@@ -97,6 +114,7 @@ def sibling_paths_from_detail(detail_path: str) -> dict[str, str]:
         "detail": detail_path,
         "summary": summary_path_from_detail(detail_path),
         "xlsx": xlsx_path_from_detail(detail_path),
+        "html": html_path_from_detail(detail_path),
         "run_log": run_log_path_from_detail(detail_path),
         "raw_cache": raw_cache_path_from_detail(detail_path),
     }

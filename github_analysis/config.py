@@ -19,6 +19,12 @@ GH_API_RETRIES = 4
 GH_API_RETRY_BASE_SEC = 2
 API_LIST_PAGES_MAX = 100  # × 100 items/page
 SEARCH_MAX_PAGES = 20
+GH_API_MAX_IN_FLIGHT = 12
+GH_API_MIN_INTERVAL_SEC = 0.12
 
 # Parallel PR detail fetch (Phase 2). 4 is a balance of speed vs GitHub rate limits.
 DEFAULT_FETCH_WORKERS = 4
+
+# Per-PR resource fetches run inside a PR detail worker. The global GitHub API
+# cap above keeps nested concurrency from spawning unbounded `gh api` processes.
+PR_RESOURCE_FETCH_WORKERS = 5

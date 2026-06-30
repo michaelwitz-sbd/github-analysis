@@ -19,7 +19,8 @@ uv run github-analysis run \
   --repo global-services \
   --month 2026-05 \
   --merged-only \
-  --workers 4
+  --workers 4 \
+  --pr-resource-workers 5
 ```
 
 | Flag | Meaning |
@@ -30,6 +31,7 @@ uv run github-analysis run \
 | `--end-date` | First calendar day **excluded** — with `--month 2026-05`, same as `2026-05-01` .. `2026-06-01` |
 | `--merged-only` | PR detail sheet: merged PRs only; person summary still includes authored, open, and review counts |
 | `--workers` | Parallel fetch threads (default `4`) |
+| `--pr-resource-workers` | Parallel resource fetches inside each PR worker (default `5`; use `1` for serial baseline) |
 | `-o` | Excel path; sibling TSV, cache, and log share the same base name |
 
 **Outputs** — default base name `{repo}_{start}_to_{end}` (date range in every filename; omit `-o` to use this pattern):
@@ -157,6 +159,13 @@ All commands: `uv run github-analysis <command> --help`
 | `--end-date` | analyze, run | End exclusive (`YYYY-MM-DD`); required unless `--month` is set |
 | `--merged-only` | analyze, run | Detail sheet: merged PRs only (see [Monthly metrics](#monthly-metrics)) |
 | `--workers` | analyze, run | Parallel fetch threads (default `4`; use `3` or `1` under rate pressure) |
+| `--pr-resource-workers` | analyze, run | Parallel resource fetches inside each PR detail worker (default `5`; use `1` to compare against serial per-PR resource fetch) |
+| `--html` | run | Also write a self-contained HTML dashboard report |
+| `--html-output` | run | Custom HTML dashboard path; defaults to sibling `.html` beside the Excel output |
+| `--bucket` | run | HTML trend granularity: `weekly`, `monthly`, or `none` (default `weekly`) |
+| `--data-dir` | run | Local generated snapshot cache for avoiding repeated GitHub fetches (default `data`) |
+| `--cache-policy` | run | `cache-first` uses `data/` snapshots when available; `github-only` always fetches GitHub |
+| `--refresh-all` | run | Ignore `data/` snapshots and fetch fresh GitHub data |
 | `-o`, `--output` | run | Excel path (`.xlsx`); writes sibling TSV files |
 | `-o`, `--output` | analyze | Detail TSV path (`-` = stdout) |
 | `-o`, `--output` | export | Excel path (required) |
@@ -167,6 +176,36 @@ All commands: `uv run github-analysis <command> --help`
 | `--summary` | export | Input person summary TSV (required) |
 | `--detail` | export | Input PR detail TSV (optional second sheet) |
 | `--summary-only` | export, run | Excel with Individual Production sheet only |
+
+### HTML dashboard and local data cache
+
+`run --html` writes a browser-openable dashboard using the same metrics as the TSV
+and Excel outputs. The dashboard includes an overview, repository breakdown,
+sortable person comparison table, time-based metric charts, person detail tabs,
+and a Teams page for ad hoc team assignment and team-level charts.
+
+Use `--bucket weekly`, `--bucket monthly`, or `--bucket none` to control the
+trend chart buckets embedded in the HTML report.
+
+By default, `run` also uses `--cache-policy cache-first` with `--data-dir data`.
+When a matching snapshot exists under `data/`, the command rebuilds TSV, Excel,
+and HTML from that local snapshot instead of calling GitHub. On a cache miss, it
+fetches from GitHub and saves a reusable snapshot back to `data/`.
+
+Example:
+
+```bash
+uv run github-analysis run \
+  --repo global-services \
+  --month 2026-06 \
+  --merged-only \
+  --html \
+  --output-dir analysis-results \
+  --data-dir data
+```
+
+Use `--refresh-all` or `--cache-policy github-only` when you need to force a new
+GitHub fetch.
 
 ### Repository formats
 
@@ -228,7 +267,7 @@ Every metric (merged, authored, reviews, `prs_open` snapshot at month-end) uses 
 uv run github-analysis run \
   --repo global-services \
   --month 2026-05 \
-  --merged-only --workers 4 \
+  --merged-only --workers 4 --pr-resource-workers 5 \
   --output-dir ~/Documents
 # → global-services_2026-05-01_to_2026-06-01.xlsx (+ siblings)
 ```
@@ -239,7 +278,7 @@ uv run github-analysis run \
 uv run github-analysis analyze \
   --repo global-services \
   --start-date 2026-05-01 --end-date 2026-06-01 \
-  --merged-only --workers 4 \
+  --merged-only --workers 4 --pr-resource-workers 5 \
   -o ~/Documents/global-services-may-2026.tsv
 
 uv run github-analysis export \
