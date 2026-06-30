@@ -6,6 +6,7 @@ analysis-results/
 __pycache__/
 *.py[cod]
 results/
+graphify-out/
 
 # Local generated cache snapshots for HTML/report rebuilds.
 data/*
