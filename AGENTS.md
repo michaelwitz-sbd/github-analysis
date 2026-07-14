@@ -12,6 +12,7 @@ This file covers **what agents should do** when a user asks for help (including 
 |-------|----------------|
 | One-time setup (`uv`, `gh`, PAT, SSO) | [Install and setup](README.md#install-and-setup) |
 | Monthly combined Excel (primary workflow) | [Monthly combined workbook (CEDT)](README.md#monthly-combined-workbook-cedt) |
+| Agency / team tabs (`config/teams.yaml`) | [Agency / team tabs](README.md#agency--team-tabs) |
 | Output directory (`--output-dir`, `GITHUB_ANALYSIS_RESULTS`) | [Output directory configuration](README.md#output-directory-configuration) |
 | macOS / Linux / Windows, no `~/Dev` required | [macOS guide](#macos-macbook--setup-and-monthly-report), [Windows guide](#windows--setup-and-monthly-report), [Platforms and paths](README.md#platforms-and-paths) |
 | Single-repo CLI | [Single-repo quick start](README.md#single-repo-quick-start), [Commands](README.md#commands) |
@@ -63,13 +64,25 @@ Discover the **clone path** (`git rev-parse --show-toplevel`) and **output direc
 
 **Deliverable path:** `{results-base}/YYYY-MM/combined-YYYY-MM.xlsx` (or `{results-base}/{START}_to_{END}/…` for partial runs) — report the **resolved full path**, not a hardcoded `~/Dev/...` location. Team tabs come from `config/teams.yaml`.
 
+### Agency / team tabs (agents)
+
+Full schema and examples: [Agency / team tabs](README.md#agency--team-tabs).
+
+| User asks | You do |
+|-----------|--------|
+| Add / edit a team or member | Edit [`config/teams.yaml`](config/teams.yaml) only — `name` (sheet tab), optional `team_banner` (row-1 banner), `members[].name` + `members[].user` |
+| Rebuild after roster change (data already fetched) | Re-run `combine_person_summaries.py` on that run’s directory — do **not** re-fetch GitHub unless they ask |
+| “What’s on the TresPi tab?” | Point to README: banner = `team_banner`, rows = Totals filtered to that roster |
+
+Do **not** hardcode team rosters in Python or shell scripts.
+
 ### Agent checklist
 
 1. **`gh auth status`** — if it fails, walk the user through [Authenticate with GitHub](README.md#4-authenticate-with-github); you cannot complete browser OAuth for them.
 2. Confirm **which month or date range** in plain language before running.
 3. Run the command from the **tool repo root** with `working_directory` set if Cursor shell output is empty.
-4. On failure, read **`{repo}-*_run.log`** in the user's output directory — do not guess.
-5. Tell the user the **full path** to the combined `.xlsx` when done.
+4. On failure, read **`{repo}-*_run.log`** in the user's **run subdirectory** — do not guess.
+5. Tell the user the **full path** to the combined `.xlsx` when done (under `{results-base}/YYYY-MM/` or `{START}_to_{END}/`).
 6. **Do not commit** generated `.tsv` / `.xlsx` / `.json` / `.log` files.
 
 ---
@@ -96,6 +109,8 @@ Use README for factual details; your job is to **execute and explain in plain la
 | “It failed” / “Nothing happened” | Read latest `*_run.log`; explain in non-jargon (see below) |
 | “Do I need to run anything?” | No — if setup is done, you run the script; they only log in to GitHub if auth is missing |
 | “What’s in the Totals sheet?” | Point to [Monthly combined workbook (CEDT)](README.md#monthly-combined-workbook-cedt) |
+| “Add another agency / team tab” | Edit `config/teams.yaml` per [Agency / team tabs](README.md#agency--team-tabs); rebuild combined Excel if they already have a run |
+| “Change the TresPi banner title” | Set `team_banner` on that team in `config/teams.yaml`, then rebuild combined Excel |
 
 ### Relaying errors (plain language)
 
@@ -116,7 +131,8 @@ Always state expected **wait time (~15–30 minutes)** once before a full fetch.
 |------|--------|
 | Add CLI command | [docs/extending-the-cli.md](docs/extending-the-cli.md) |
 | Pipeline / phases | [docs/architecture.md](docs/architecture.md) |
-| Combined workbook logic | `scripts/combine_person_summaries.py` |
+| Combined workbook / team tabs | `scripts/combine_person_summaries.py` |
+| Agency rosters | `config/teams.yaml` (not Python) |
 | Defaults (org, output dir) | `github_analysis/config.py` |
 
-After changing CLI, columns, or monthly workflow: **update README.md first**, then adjust this file only if agent behavior changes.
+After changing CLI, columns, teams config schema, or monthly workflow: **update README.md first**, then adjust this file only if agent behavior changes.

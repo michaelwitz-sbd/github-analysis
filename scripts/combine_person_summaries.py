@@ -47,6 +47,7 @@ class TeamMember:
 class Team:
     name: str
     members: list[TeamMember]
+    team_banner: str = ""
 
 
 def _parse_float(s: str) -> float | None:
@@ -125,6 +126,11 @@ def load_teams_config(path: Path | None) -> list[Team]:
         name = str(raw.get("name") or "").strip()
         if not name:
             raise SystemExit(f"teams[{i}] missing name in {path}")
+        # Prefer team_banner; accept legacy team_header
+        banner_raw = raw.get("team_banner")
+        if banner_raw is None or str(banner_raw).strip() == "":
+            banner_raw = raw.get("team_header")
+        team_banner = str(banner_raw or name).strip() or name
         members_raw = raw.get("members") or []
         if not isinstance(members_raw, list) or not members_raw:
             raise SystemExit(f"teams[{i}] ({name}) must have a non-empty members list")
@@ -139,7 +145,7 @@ def load_teams_config(path: Path | None) -> list[Team]:
                     f"teams[{i}].members[{j}] needs both 'name' and 'user' in {path}"
                 )
             members.append(TeamMember(name=staff, user=user))
-        teams.append(Team(name=name, members=members))
+        teams.append(Team(name=name, members=members, team_banner=team_banner))
     return teams
 
 
@@ -247,7 +253,29 @@ def _team_sheet_from_totals(
     return headers, rows
 
 
-def _write_sheet(workbook, title: str, headers: list[str], rows: list[list[str]], *, active: bool = False) -> None:
+def _cell_value(raw: str):
+    """Prefer real numbers in Excel (avoids 'number stored as text' warnings)."""
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    try:
+        if re.fullmatch(r"-?\d+", s):
+            return int(s)
+        if re.fullmatch(r"-?\d+\.\d+", s):
+            return float(s)
+    except ValueError:
+        pass
+    return s
+
+
+def _write_sheet(
+    workbook,
+    title: str,
+    headers: list[str],
+    rows: list[list[str]],
+    *,
+    active: bool = False,
+) -> None:
     from openpyxl.styles import Font
 
     if active:
@@ -255,12 +283,69 @@ def _write_sheet(workbook, title: str, headers: list[str], rows: list[list[str]]
         ws.title = _sheet_title(title)
     else:
         ws = workbook.create_sheet(_sheet_title(title))
+
     ws.append(headers)
     for row in rows:
         ws.append(row)
     for cell in ws[1]:
         cell.font = Font(bold=True)
     _autosize_columns(ws, headers, rows)
+
+
+TOTALS_BANNER = "All Staff Metrics"
+
+
+def _write_bannered_sheet(
+    workbook,
+    title: str,
+    banner: str,
+    headers: list[str],
+    rows: list[list[str]],
+    *,
+    active: bool = False,
+) -> None:
+    """Bannered sheet: title banner, underlined headers, roomier cells, numeric values."""
+    from openpyxl.styles import Alignment, Border, Font, Side
+    from openpyxl.utils import get_column_letter
+
+    if active:
+        ws = workbook.active
+        ws.title = _sheet_title(title)
+    else:
+        ws = workbook.create_sheet(_sheet_title(title))
+
+    last_col = max(len(headers), 1)
+    header_row = 2
+    data_start = 3
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    banner_cell = ws.cell(row=1, column=1, value=banner)
+    banner_cell.font = Font(bold=True, size=14)
+    banner_cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[1].height = 28
+
+    underline = Border(bottom=Side(style="medium", color="000000"))
+    col_align = Alignment(horizontal="left", vertical="center", indent=1)
+    for col, header in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=col, value=header)
+        cell.font = Font(bold=True)
+        cell.border = underline
+        cell.alignment = col_align
+    ws.row_dimensions[header_row].height = 22
+
+    for r_i, row in enumerate(rows, start=data_start):
+        ws.row_dimensions[r_i].height = 20
+        for c_i, value in enumerate(row, start=1):
+            cell = ws.cell(row=r_i, column=c_i, value=_cell_value(value))
+            cell.alignment = col_align
+
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for idx, value in enumerate(row):
+            if idx < len(widths):
+                widths[idx] = max(widths[idx], len(str(value)))
+    for idx, width in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = min(max(width + 4, 12), 64)
 
 
 def combine_workbook(
@@ -305,11 +390,24 @@ def combine_workbook(
     )
 
     workbook = Workbook()
-    _write_sheet(workbook, "Totals", totals_headers, totals_rows, active=True)
+    _write_bannered_sheet(
+        workbook,
+        "Totals",
+        TOTALS_BANNER,
+        totals_headers,
+        totals_rows,
+        active=True,
+    )
 
     for team in teams or []:
         th, tr = _team_sheet_from_totals(totals_headers, totals_rows, team)
-        _write_sheet(workbook, team.name, th, tr)
+        _write_bannered_sheet(
+            workbook,
+            team.name,
+            team.team_banner or team.name,
+            th,
+            tr,
+        )
 
     for label, h, rows in repo_rows:
         _write_sheet(workbook, label, h, rows)

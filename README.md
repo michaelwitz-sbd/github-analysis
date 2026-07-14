@@ -18,19 +18,72 @@ That workbook has:
 
 | Sheet | Contents |
 |-------|----------|
-| **Totals** | One row per GitHub user — PR counts **summed across all five repos** (no repo column) |
-| **Team tabs** (e.g. **TresPi**) | Roster from [`config/teams.yaml`](config/teams.yaml) — Totals rows for those GitHub users, plus a `staff_name` column |
+| **Totals** | All staff rollup — banner **All Staff Metrics**, same formatting as team tabs; one row per GitHub user across all five repos |
+| **Team tabs** (e.g. **TresPi**) | One sheet per agency in [`config/teams.yaml`](config/teams.yaml) — roster filtered from Totals (see [Agency / team tabs](#agency--team-tabs)) |
 | **global-services** | Person metrics for that repo |
 | **global-user-services** | Person metrics for that repo |
 | **polaris-turbo** | Person metrics for that repo |
 | **org-manager** | Person metrics for that repo |
 | **places-proxy** | Person metrics for that repo |
 
+Sheet order in the combined workbook: **Totals** → **team tabs** (config order) → **repo tabs**.
+
 The monthly script **fetches raw data from GitHub** for all five CEDT repos, writes per-repo Excel/TSV/cache files, then **builds the combined workbook** automatically. Expect **15–30 minutes** depending on API volume.
 
 ### Agency / team tabs
 
-Edit [`config/teams.yaml`](config/teams.yaml) (JSON also supported) to add agencies. Each team needs a display `name` and `members` with staff `name` + GitHub `user`. Members with no activity in the window still appear with zero counts. Matching is case-insensitive on the GitHub login.
+Agency (vendor) teams get their own sheets in the combined Excel. Rosters live in [`config/teams.yaml`](config/teams.yaml) — **edit that file only**; no code changes are required to add or update teams. JSON is also supported (same schema).
+
+#### Sheet layout
+
+| Row | Content |
+|-----|---------|
+| 1 | **`team_banner`** text (merged across columns), e.g. `TresPi Staff Metrics` |
+| 2 | Column headers (`staff_name`, `user`, PR metrics, …) |
+| 3+ | One row per roster member (config order), metrics taken from **Totals** |
+
+Members with no activity in the window still appear with zero counts. GitHub login matching is **case-insensitive**.
+
+#### Config fields
+
+| Field | Required | Purpose |
+|-------|----------|---------|
+| `name` | Yes | Excel **sheet tab** title (max 31 characters; avoid `: \ / ? * [ ]`) |
+| `team_banner` | No | Banner text in **row 1** of the sheet. Defaults to `name` if omitted |
+| `members` | Yes | Non-empty list of people on that team |
+| `members[].name` | Yes | Display name → `staff_name` column |
+| `members[].user` | Yes | GitHub login → matched against Totals `user` |
+
+#### Example — add another team
+
+Append another entry under `teams:` in [`config/teams.yaml`](config/teams.yaml):
+
+```yaml
+teams:
+  - name: TresPi
+    team_banner: "TresPi Staff Metrics"
+    members:
+      - name: Alexandra Ortiz
+        user: AlexsOrtiz
+      - name: Brandon Velasquez
+        user: brandon-trespi
+      # …
+
+  - name: AcmeAgency
+    team_banner: "Acme Agency Staff Metrics"
+    members:
+      - name: Jane Doe
+        user: jane-doe-gh
+      - name: Sam Lee
+        user: samlee
+```
+
+That produces two team sheets after Totals: **TresPi** and **AcmeAgency**, each with its own header banner and roster.
+
+#### After editing the roster
+
+- **Next monthly / partial run** — team tabs are built automatically from `config/teams.yaml`.
+- **Rebuild Excel only** (person summaries already fetched) — see [Rebuild combined Excel only](#rebuild-combined-excel-only-no-github-fetch). Use `--no-teams` to skip team tabs, or `--teams-config PATH` for a different file.
 
 ### One-time setup
 
