@@ -10,18 +10,27 @@ Uses the [GitHub CLI](https://cli.github.com/) (`gh`) for API access. See [Insta
 
 ## Monthly combined workbook (CEDT)
 
-**Primary deliverable each month:** `{output-dir}/combined-YYYY-MM.xlsx` (default output dir: `~/github-analysis-results/` — see [Output directory configuration](#output-directory-configuration))
+**Primary deliverable each month:** `{output-dir}/YYYY-MM/combined-YYYY-MM.xlsx` (default base: `~/github-analysis-results/` — see [Output directory configuration](#output-directory-configuration))
 
-That workbook has four sheets:
+Each run writes into its **own subdirectory** under the results base (monthly: `YYYY-MM/`; partial windows: `{START}_to_{END}/`).
+
+That workbook has:
 
 | Sheet | Contents |
 |-------|----------|
-| **Totals** | One row per GitHub user — PR counts **summed across all three repos** (no repo column) |
+| **Totals** | One row per GitHub user — PR counts **summed across all five repos** (no repo column) |
+| **Team tabs** (e.g. **TresPi**) | Roster from [`config/teams.yaml`](config/teams.yaml) — Totals rows for those GitHub users, plus a `staff_name` column |
 | **global-services** | Person metrics for that repo |
 | **global-user-services** | Person metrics for that repo |
 | **polaris-turbo** | Person metrics for that repo |
+| **org-manager** | Person metrics for that repo |
+| **places-proxy** | Person metrics for that repo |
 
-The monthly script **fetches raw data from GitHub** for all three CEDT repos, writes per-repo Excel/TSV/cache files, then **builds the combined workbook** automatically. Expect **10–20 minutes** depending on API volume.
+The monthly script **fetches raw data from GitHub** for all five CEDT repos, writes per-repo Excel/TSV/cache files, then **builds the combined workbook** automatically. Expect **15–30 minutes** depending on API volume.
+
+### Agency / team tabs
+
+Edit [`config/teams.yaml`](config/teams.yaml) (JSON also supported) to add agencies. Each team needs a display `name` and `members` with staff `name` + GitHub `user`. Members with no activity in the window still appear with zero counts. Matching is case-insensitive on the GitHub login.
 
 ### One-time setup
 
@@ -59,10 +68,10 @@ cd /path/to/github-analysis
 When it finishes, open the combined workbook in your configured output folder (default):
 
 ```text
-~/github-analysis-results/combined-2026-07.xlsx
+~/github-analysis-results/2026-07/combined-2026-07.xlsx
 ```
 
-On Windows (PowerShell): `%USERPROFILE%\github-analysis-results\combined-2026-07.xlsx`
+On Windows (PowerShell): `%USERPROFILE%\github-analysis-results\2026-07\combined-2026-07.xlsx`
 
 **Dry-run** (prints the date window and output paths without fetching):
 
@@ -80,11 +89,11 @@ See [Output directory configuration](#output-directory-configuration).
 
 ### What the monthly script creates
 
-All files land in the **resolved output directory** (default `~/github-analysis-results/`; see [Output directory configuration](#output-directory-configuration)):
+All files land in a **per-run subdirectory** under the results base (default `~/github-analysis-results/YYYY-MM/`; see [Output directory configuration](#output-directory-configuration)):
 
 | File | Purpose |
 |------|---------|
-| `combined-YYYY-MM.xlsx` | **Final deliverable** — Totals + three repo tabs |
+| `combined-YYYY-MM.xlsx` | **Final deliverable** — Totals + team tabs + five repo tabs |
 | `{repo}-YYYY-MM-01_to_YYYY-MM-NN.xlsx` | Per-repo Excel (Individual Production + PR Detail) |
 | `{repo}-…_person_summary.tsv` | Person rollup for that repo (input to Totals) |
 | `{repo}-….tsv` | PR-level detail |
@@ -98,6 +107,8 @@ Repos analyzed (production defaults):
 | `global-services` | 4 |
 | `global-user-services` | 3 |
 | `polaris-turbo` | 4 |
+| `org-manager` | 3 |
+| `places-proxy` | 3 |
 
 Flags applied automatically: **`--merged-only`**, US Eastern (`America/New_York`), half-open date window.
 
@@ -110,7 +121,7 @@ cd /path/to/github-analysis
 
 `END` is **exclusive** — for June 1–23 inclusive use `2026-06-01` and `2026-06-24`.
 
-Produces `combined-START_to_END.xlsx` in your output directory.
+Produces `~/github-analysis-results/START_to_END/combined-START_to_END.xlsx` (or under `--output-dir` if you pass an exact run folder).
 
 ### Rebuild combined Excel only (no GitHub fetch)
 
@@ -119,18 +130,18 @@ If per-repo `*_person_summary.tsv` files already exist:
 ```bash
 cd /path/to/github-analysis
 uv run python scripts/combine_person_summaries.py \
-  --input-dir ~/github-analysis-results \
+  --input-dir ~/github-analysis-results/2026-07-01_to_2026-08-01 \
   --stem-suffix "2026-07-01_to_2026-08-01" \
-  -o ~/github-analysis-results/combined-2026-07.xlsx
+  -o ~/github-analysis-results/2026-07-01_to_2026-08-01/combined-2026-07.xlsx
 ```
 
-Use `--stem-suffix` when the results folder contains more than one date window.
+Team tabs load from `config/teams.yaml` by default (`--no-teams` to skip; `--teams-config PATH` to override).
 
 Human runbook: [docs/monthly-runbook.md](docs/monthly-runbook.md) (links back here). **Using Cursor or another AI assistant?** See [AGENTS.md](AGENTS.md).
 
 ### Not comfortable with Terminal?
 
-Ask an assistant (or a colleague) to run the monthly script for you after [one-time setup](#install-and-setup). You only need to complete **GitHub login** (`gh auth login`) if prompted. The report file will be in your output folder (default `~/github-analysis-results/combined-YYYY-MM.xlsx`).
+Ask an assistant (or a colleague) to run the monthly script for you after [one-time setup](#install-and-setup). You only need to complete **GitHub login** (`gh auth login`) if prompted. The report file will be in your output folder (default `~/github-analysis-results/YYYY-MM/combined-YYYY-MM.xlsx`).
 
 **Open the file:**
 - **macOS:** Finder → **Go → Go to Folder…** → `~/github-analysis-results`
@@ -235,7 +246,7 @@ cd ~/Projects/github-analysis    # your clone path
 Allow **10–20 minutes**. When it finishes, open:
 
 ```text
-~/github-analysis-results/combined-2026-07.xlsx
+~/github-analysis-results/2026-07/combined-2026-07.xlsx
 ```
 
 (or `$GITHUB_ANALYSIS_RESULTS/combined-2026-07.xlsx` if you set the env var)
@@ -315,14 +326,14 @@ C:\Users\YourName\github-analysis-results\combined-2026-07.xlsx
 
 **Custom folder for one month:** `./scripts/run_monthly.sh 2026-07 --output-dir "$HOME/Documents/july-check"`
 
-**PowerShell-only (no Git Bash):** use the CLI directly for a single repo, or install Git Bash/WSL for the full monthly trio script. Example single-repo run:
+**PowerShell-only (no Git Bash):** use the CLI directly for a single repo, or install Git Bash/WSL for the full monthly multi-repo script. Example single-repo run:
 
 ```powershell
 cd $HOME\github-analysis
 uv run github-analysis run --repo global-services --month 2026-07 --merged-only --output-dir "$env:USERPROFILE\github-analysis-results"
 ```
 
-For the full three-repo **combined** workbook without bash, use **Git Bash** and `./scripts/run_monthly.sh` as above.
+For the full five-repo **combined** workbook without bash, use **Git Bash** and `./scripts/run_monthly.sh` as above.
 
 ---
 
@@ -603,7 +614,7 @@ uv run github-analysis run \
 # → ~/github-analysis-results/global-services_2026-05-01_to_2026-06-01.xlsx (+ siblings)
 ```
 
-**Three repos + combined workbook** — use the [monthly script](#each-month--run-in-terminal) or `scripts/run_cedt_trio.sh`.
+**Five repos + combined workbook** — use the [monthly script](#each-month--run-in-terminal) or `scripts/run_cedt_trio.sh`.
 
 **Analyze then export separately:**
 

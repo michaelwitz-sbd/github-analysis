@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
-# Run the three standard CEDT repos and build a combined Excel workbook.
+# Run the standard CEDT repos and build a combined Excel workbook.
+#
+# Repos: global-services, global-user-services, polaris-turbo, org-manager, places-proxy
+# Team tabs: config/teams.yaml (agency rosters)
 #
 # Usage:
 #   ./scripts/run_cedt_trio.sh START END
 #   ./scripts/run_cedt_trio.sh START END --output-dir ~/Reports/github
 #   ./scripts/run_cedt_trio.sh 2026-07-01 2026-08-01 --output-dir ~/Reports/github-metrics combined-2026-07.xlsx
 #
-# Output directory: --output-dir, positional arg 3, or GITHUB_ANALYSIS_RESULTS env var.
+# Output layout:
+#   Without --output-dir: {GITHUB_ANALYSIS_RESULTS|~/github-analysis-results}/{START}_to_{END}/
+#   With --output-dir DIR: files go directly in DIR (exact run folder; no extra nesting)
 
 set -euo pipefail
 
@@ -18,12 +23,13 @@ usage() {
   echo "Usage: $0 START END [OUTPUT_DIR] [COMBINED_XLSX_NAME]" >&2
   echo "       $0 START END [--output-dir DIR] [--combined-name FILE]" >&2
   echo "  START/END: YYYY-MM-DD (END is exclusive)" >&2
-  echo "  Output dir: --output-dir, 3rd positional arg, or GITHUB_ANALYSIS_RESULTS" >&2
-  echo "              (--output-dir overrides env var when both are set)" >&2
+  echo "  Default output: ~/github-analysis-results/{START}_to_{END}/" >&2
+  echo "  --output-dir: exact run folder (no date subdir appended)" >&2
   exit 2
 }
 
-OUT_DIR="${GITHUB_ANALYSIS_RESULTS:-$HOME/github-analysis-results}"
+OUT_BASE="${GITHUB_ANALYSIS_RESULTS:-$HOME/github-analysis-results}"
+OUT_DIR=""
 COMBINED_NAME=""
 POSITIONAL=()
 
@@ -68,12 +74,16 @@ fi
 if [[ ${#POSITIONAL[@]} -ge 4 ]]; then
   COMBINED_NAME="${POSITIONAL[3]}"
 fi
+
+STEM_SUFFIX="${START}_to_${END}"
+if [[ -z "$OUT_DIR" ]]; then
+  OUT_DIR="${OUT_BASE}/${STEM_SUFFIX}"
+fi
 if [[ -z "$COMBINED_NAME" ]]; then
-  COMBINED_NAME="combined-${START}_to_${END}.xlsx"
+  COMBINED_NAME="combined-${STEM_SUFFIX}.xlsx"
 fi
 
 mkdir -p "$OUT_DIR"
-STEM_SUFFIX="${START}_to_${END}"
 
 echo "==> uv sync"
 uv sync --group excel
@@ -96,6 +106,8 @@ run_one() {
 run_one global-services 4
 run_one global-user-services 3
 run_one polaris-turbo 4
+run_one org-manager 3
+run_one places-proxy 3
 
 COMBINED="$OUT_DIR/$COMBINED_NAME"
 echo "==> combine person summaries -> $COMBINED"

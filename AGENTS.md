@@ -28,9 +28,11 @@ This file covers **what agents should do** when a user asks for help (including 
 github-analysis/
 ├── README.md                      # human runbook — update when CLI/columns change
 ├── AGENTS.md                      # this file
+├── config/
+│   └── teams.yaml                 # agency/team rosters → combined workbook team tabs
 ├── scripts/
-│   ├── run_monthly.sh             # full calendar month → combined-YYYY-MM.xlsx
-│   ├── run_cedt_trio.sh           # partial window, three CEDT repos
+│   ├── run_monthly.sh             # full calendar month → YYYY-MM/combined-YYYY-MM.xlsx
+│   ├── run_cedt_trio.sh           # partial window → START_to_END/ under results base
 │   └── combine_person_summaries.py
 ├── docs/architecture.md
 └── github_analysis/               # Python package (cli, pipeline, export)
@@ -40,7 +42,7 @@ github-analysis/
 
 ## Default behavior (do not override unless user asks)
 
-Production monthly runs use **`./scripts/run_monthly.sh YYYY-MM`**, which applies the CEDT trio, **`--merged-only`**, US Eastern dates, and workers documented in README. See [Monthly combined workbook (CEDT)](README.md#monthly-combined-workbook-cedt).
+Production monthly runs use **`./scripts/run_monthly.sh YYYY-MM`**, which applies the five CEDT repos, **`--merged-only`**, US Eastern dates, and workers documented in README. See [Monthly combined workbook (CEDT)](README.md#monthly-combined-workbook-cedt).
 
 ---
 
@@ -59,7 +61,7 @@ Discover the **clone path** (`git rev-parse --show-toplevel`) and **output direc
 | Partial window | `./scripts/run_cedt_trio.sh START END` — dates per README |
 | Combined Excel only (data already fetched) | `uv run python scripts/combine_person_summaries.py …` — see README [Rebuild combined Excel only](README.md#rebuild-combined-excel-only-no-github-fetch) |
 
-**Deliverable path:** `{output-dir}/combined-YYYY-MM.xlsx` — report the **resolved full path**, not a hardcoded `~/Dev/...` location.
+**Deliverable path:** `{results-base}/YYYY-MM/combined-YYYY-MM.xlsx` (or `{results-base}/{START}_to_{END}/…` for partial runs) — report the **resolved full path**, not a hardcoded `~/Dev/...` location. Team tabs come from `config/teams.yaml`.
 
 ### Agent checklist
 
@@ -104,7 +106,7 @@ Use README for factual details; your job is to **execute and explain in plain la
 | Rate limit / 403 | “GitHub throttled us — wait ~an hour and we can retry.” |
 | Run succeeded | “Your report is ready at …/combined-YYYY-MM.xlsx — open that file in Excel.” |
 
-Always state expected **wait time (~10–20 minutes)** once before a full fetch.
+Always state expected **wait time (~15–30 minutes)** once before a full fetch.
 
 ---
 

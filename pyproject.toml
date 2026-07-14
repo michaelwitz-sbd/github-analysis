@@ -7,7 +7,7 @@ requires-python = ">=3.9"
 dependencies = []
 
 [project.optional-dependencies]
-excel = ["openpyxl>=3.1.0"]
+excel = ["openpyxl>=3.1.0", "pyyaml>=6.0"]
 
 [project.scripts]
 github-analysis = "github_analysis.cli.main:main"
@@ -20,4 +20,4 @@ build-backend = "hatchling.build"
 packages = ["github_analysis"]
 
 [dependency-groups]
-excel = ["openpyxl>=3.1.0"]
+excel = ["openpyxl>=3.1.0", "pyyaml>=6.0"]

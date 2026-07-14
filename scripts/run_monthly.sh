@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Unattended monthly CEDT trio report + combined Excel.
+# Unattended monthly CEDT multi-repo report + combined Excel.
 #
 # Usage:
 #   ./scripts/run_monthly.sh 2026-07
@@ -18,7 +18,7 @@ usage() {
   exit 2
 }
 
-OUT_DIR="${GITHUB_ANALYSIS_RESULTS:-$HOME/github-analysis-results}"
+OUT_BASE="${GITHUB_ANALYSIS_RESULTS:-$HOME/github-analysis-results}"
 MONTH=""
 DRY_RUN=false
 
@@ -26,7 +26,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --output-dir)
       [[ $# -ge 2 ]] || usage
-      OUT_DIR="$2"
+      OUT_BASE="$2"
       shift 2
       ;;
     --dry-run)
@@ -83,6 +83,8 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOL="$(cd "$SCRIPT_DIR/.." && pwd)"
+# One directory per monthly run under the results base
+OUT_DIR="${OUT_BASE}/${MONTH}"
 COMBINED="combined-${MONTH}.xlsx"
 TRIO="${TOOL}/scripts/run_cedt_trio.sh"
 
